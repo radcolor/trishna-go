@@ -6,7 +6,10 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/radcolor/trishna-go/internal/runtime"
 )
 
 const (
@@ -22,6 +25,13 @@ type Service struct {
 	webhookClient *WebhookClient
 	state         *State
 	lookupEnv     LookupEnv
+
+	mu          sync.Mutex
+	running     bool
+	watchCount  int
+	lastPollAt  *time.Time
+	lastError   string
+	lastErrorAt *time.Time
 }
 
 func NewService(logger *slog.Logger) (*Service, error) {
@@ -65,6 +75,46 @@ func (s *Service) Name() string {
 	return serviceName
 }
 
+func (s *Service) Health() runtime.ServiceHealth {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	health := runtime.ServiceHealth{
+		Name:      serviceName,
+		Running:   s.running,
+		LastOK:    s.lastPollAt,
+		LastError: s.lastError,
+	}
+
+	switch {
+	case s.watchCount == 0:
+		health.Detail = "disabled (no webhooks configured)"
+	case s.running:
+		health.Detail = fmt.Sprintf("%d channel(s)", s.watchCount)
+	default:
+		health.Detail = "not started"
+	}
+
+	return health
+}
+
+func (s *Service) recordPollSuccess() {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastPollAt = &now
+	s.lastError = ""
+	s.lastErrorAt = nil
+}
+
+func (s *Service) recordPollError(err error) {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastError = err.Error()
+	s.lastErrorAt = &now
+}
+
 func (s *Service) Run(ctx context.Context) error {
 	watches, err := s.resolveWatches()
 	if err != nil {
@@ -76,15 +126,23 @@ func (s *Service) Run(ctx context.Context) error {
 		return nil
 	}
 
+	s.mu.Lock()
+	s.running = true
+	s.watchCount = len(watches)
+	s.mu.Unlock()
+
 	s.logger.Info("youtube service starting", slog.Int("channels", len(watches)))
 
 	for _, watch := range watches {
 		if err := s.pollChannel(ctx, watch); err != nil {
+			s.recordPollError(err)
 			s.logger.Error("youtube initial poll failed",
 				slog.String("channel_id", watch.channel.ID),
 				slog.String("channel_name", watch.channel.Name),
 				slog.String("error", err.Error()),
 			)
+		} else {
+			s.recordPollSuccess()
 		}
 	}
 
@@ -99,11 +157,14 @@ func (s *Service) Run(ctx context.Context) error {
 		case <-ticker.C:
 			for _, watch := range watches {
 				if err := s.pollChannel(ctx, watch); err != nil {
+					s.recordPollError(err)
 					s.logger.Error("youtube poll failed",
 						slog.String("channel_id", watch.channel.ID),
 						slog.String("channel_name", watch.channel.Name),
 						slog.String("error", err.Error()),
 					)
+				} else {
+					s.recordPollSuccess()
 				}
 			}
 		}

@@ -11,6 +11,7 @@ Current skeleton includes:
 - Slash command sync
 - Module registry
 - `/ping` command
+- `/status` command (bot uptime, version, process stats, Mac Mini CPU/RAM/SSD, services)
 - YouTube RSS poller with Discord webhook notifications
 - Docker build target
 
@@ -29,6 +30,8 @@ DISCORD_WEBHOOK_SHNKPLAYS=https://discord.com/api/webhooks/...
 
 `DISCORD_WEBHOOK_SHNKPLAYS` is optional. When set, Trishna polls the hardcoded shnk YouTube channel every 5 seconds and posts new uploads or live streams to that Discord webhook. The bot does not post these updates itself; Discord receives them through the webhook URL.
 
+`STATUS_ALLOWED_USER_IDS` is optional. When set, only those Discord user IDs can run `/status`. When unset, anyone can use it.
+
 ## YouTube Webhook Setup
 
 1. In Discord, open the target channel's settings.
@@ -44,6 +47,36 @@ On first run, Trishna records the newest feed entry as a baseline and does not p
 ```sh
 go run ./cmd/trishna
 ```
+
+## Deploy on macOS (Mac Mini)
+
+Use the included `launchd` service to auto-start on login, restart on crash, and write logs.
+
+1. Copy `.env.example` to `.env` and fill in secrets.
+2. Install and start:
+
+```sh
+chmod +x deploy/macos/*.sh
+./deploy/macos/install.sh
+```
+
+This builds `dist/trishna`, keeps state in `data/`, and writes logs to:
+
+- `logs/trishna.log`
+- `logs/trishna.error.log`
+
+Useful commands:
+
+```sh
+./deploy/macos/status.sh
+./deploy/macos/restart.sh
+tail -f logs/trishna.log
+./deploy/macos/uninstall.sh
+```
+
+The service is installed as a user launch agent (`com.radcolor.trishna`), so it starts when your Mac Mini user logs in. Enable automatic login in **System Settings → Users & Groups** if you want it running after every reboot without manual sign-in.
+
+`install.sh` reads `.env` and injects values into the launch agent. Keep `.env` gitignored and re-run `./deploy/macos/install.sh` after changing secrets.
 
 ## Test
 

@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	EnvDiscordToken   = "DISCORD_TOKEN"
-	EnvDiscordGuildID = "DISCORD_GUILD_ID"
-	EnvLogLevel       = "LOG_LEVEL"
+	EnvDiscordToken          = "DISCORD_TOKEN"
+	EnvDiscordGuildID        = "DISCORD_GUILD_ID"
+	EnvLogLevel              = "LOG_LEVEL"
+	EnvStatusAllowedUserIDs  = "STATUS_ALLOWED_USER_IDS"
 )
 
 type Config struct {

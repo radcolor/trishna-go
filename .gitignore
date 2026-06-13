@@ -2,6 +2,7 @@
 .env
 data/
 dist/
+logs/
 tmp/
 coverage.out
 /trishna

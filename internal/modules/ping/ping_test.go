@@ -14,7 +14,7 @@ func TestCommands(t *testing.T) {
 
 func TestResponse(t *testing.T) {
 	response := Response()
-	if response.Content != "pong" {
+	if response.Content != "jihyooo ❤️" {
 		t.Fatalf("response content = %q", response.Content)
 	}
 }

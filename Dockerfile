@@ -6,7 +6,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/trishna ./cmd/trishna
+RUN LDFLAGS="$(sh scripts/ldflags.sh)" && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="$LDFLAGS" -o /out/trishna ./cmd/trishna
 
 FROM alpine:3.22
 
