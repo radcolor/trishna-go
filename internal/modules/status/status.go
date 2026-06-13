@@ -9,8 +9,10 @@ import (
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/snowflake/v2"
 
+	"github.com/radcolor/trishna-go/internal/llm/ollama"
 	"github.com/radcolor/trishna-go/internal/platform"
 	"github.com/radcolor/trishna-go/internal/runtime"
+	"github.com/radcolor/trishna-go/internal/shawnb/monitor"
 )
 
 const CommandName = "status"
@@ -20,17 +22,29 @@ type HostCollector interface {
 }
 
 type Deps struct {
-	Runtime   *runtime.State
-	Host      HostCollector
-	Services  []runtime.HealthReporter
-	Allowlist []snowflake.ID
+	Runtime         *runtime.State
+	Host            HostCollector
+	TrishnaServices []runtime.HealthReporter
+	Shawnb          ShawnbReporter
+	Ollama          OllamaReporter
+	Allowlist       []snowflake.ID
+}
+
+type ShawnbReporter interface {
+	Status() monitor.Status
+}
+
+type OllamaReporter interface {
+	Snapshot(ctx context.Context) ollama.Status
 }
 
 type Module struct {
-	runtime   *runtime.State
-	host      HostCollector
-	services  []runtime.HealthReporter
-	allowlist map[snowflake.ID]struct{}
+	runtime         *runtime.State
+	host            HostCollector
+	trishnaServices []runtime.HealthReporter
+	shawnb          ShawnbReporter
+	ollama          OllamaReporter
+	allowlist       map[snowflake.ID]struct{}
 }
 
 func New(deps Deps) Module {
@@ -45,10 +59,12 @@ func New(deps Deps) Module {
 	}
 
 	return Module{
-		runtime:   deps.Runtime,
-		host:      host,
-		services:  append([]runtime.HealthReporter(nil), deps.Services...),
-		allowlist: allowlist,
+		runtime:         deps.Runtime,
+		host:            host,
+		trishnaServices: append([]runtime.HealthReporter(nil), deps.TrishnaServices...),
+		shawnb:          deps.Shawnb,
+		ollama:          deps.Ollama,
+		allowlist:       allowlist,
 	}
 }
 
@@ -60,7 +76,7 @@ func (Module) Commands() []discord.ApplicationCommandCreate {
 	return []discord.ApplicationCommandCreate{
 		discord.SlashCommandCreate{
 			Name:        CommandName,
-			Description: "Show Trishna bot and Mac Mini health.",
+			Description: "Show Trishna, shawnb, and Mac Mini health.",
 		},
 	}
 }
@@ -79,12 +95,30 @@ func (m Module) HandleInteraction(event *handler.CommandEvent) error {
 
 	botSnap := m.runtime.BotSnapshot()
 	hostSnap, hostErr := m.host.Snapshot(event.Ctx)
-	serviceHealth := make([]runtime.ServiceHealth, 0, len(m.services))
-	for _, reporter := range m.services {
-		serviceHealth = append(serviceHealth, reporter.Health())
+
+	trishnaServices := make([]runtime.ServiceHealth, 0, len(m.trishnaServices))
+	for _, reporter := range m.trishnaServices {
+		trishnaServices = append(trishnaServices, reporter.Health())
 	}
 
-	content := BuildMessage(botSnap, hostSnap, hostErr, serviceHealth)
+	var shawnbStatus monitor.Status
+	if m.shawnb != nil {
+		shawnbStatus = m.shawnb.Status()
+	}
+
+	var ollamaStatus ollama.Status
+	if m.ollama != nil {
+		ollamaStatus = m.ollama.Snapshot(event.Ctx)
+	}
+
+	content := BuildMessage(Report{
+		TrishnaBot:      botSnap,
+		TrishnaServices: trishnaServices,
+		Shawnb:          shawnbStatus,
+		Ollama:          ollamaStatus,
+		Host:            hostSnap,
+		HostErr:         hostErr,
+	})
 	return event.CreateMessage(discord.MessageCreate{Content: content})
 }
 

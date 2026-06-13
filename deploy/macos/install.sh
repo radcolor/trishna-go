@@ -18,7 +18,8 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
 fi
 
 mkdir -p "$INSTALL_DIR/dist" "$INSTALL_DIR/logs" "$INSTALL_DIR/data"
-: > "$INSTALL_DIR/logs/trishna.error.log"
+rm -f "$INSTALL_DIR/logs/trishna.log" "$INSTALL_DIR/logs/trishna.error.log"
+xattr -cr "$INSTALL_DIR/logs" 2>/dev/null || true
 
 python3 - "$INSTALL_DIR/.env" > "$ENV_BLOCK_FILE" <<'PY'
 import plistlib
@@ -37,6 +38,8 @@ for raw in open(sys.argv[1], encoding="utf-8"):
         continue
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
         value = value[1:-1]
+    if not value:
+        continue
     env[key] = value
 
 for key, value in env.items():
@@ -63,8 +66,16 @@ chmod 600 "$PLIST_DEST"
 launchctl bootout "gui/$(id -u)/$PLIST_LABEL" 2>/dev/null || \
   launchctl unload "$PLIST_DEST" 2>/dev/null || true
 
-launchctl bootstrap "gui/$(id -u)" "$PLIST_DEST" 2>/dev/null || \
+sleep 1
+
+if ! launchctl bootstrap "gui/$(id -u)" "$PLIST_DEST" 2>/dev/null; then
   launchctl load "$PLIST_DEST"
+fi
+
+if ! launchctl print "gui/$(id -u)/$PLIST_LABEL" >/dev/null 2>&1; then
+  echo "error: launch agent failed to load; try: launchctl bootstrap gui/$(id -u) $PLIST_DEST"
+  exit 1
+fi
 
 echo
 echo "Trishna installed and started."

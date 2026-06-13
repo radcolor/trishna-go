@@ -6,26 +6,34 @@ import (
 	"time"
 
 	"github.com/radcolor/trishna-go/internal/buildinfo"
+	"github.com/radcolor/trishna-go/internal/llm/ollama"
 	"github.com/radcolor/trishna-go/internal/platform"
 	"github.com/radcolor/trishna-go/internal/runtime"
+	"github.com/radcolor/trishna-go/internal/shawnb/monitor"
 )
 
-func BuildMessage(
-	bot runtime.BotSnapshot,
-	host platform.HostSnapshot,
-	hostErr error,
-	services []runtime.ServiceHealth,
-) string {
+type Report struct {
+	TrishnaBot      runtime.BotSnapshot
+	TrishnaServices []runtime.ServiceHealth
+	Shawnb          monitor.Status
+	Ollama          ollama.Status
+	Host            platform.HostSnapshot
+	HostErr         error
+}
+
+func BuildMessage(r Report) string {
 	var b strings.Builder
 	b.WriteString("**Trishna Bot Status**\n```\n")
-	b.WriteString(formatBotSection(bot, services))
+	b.WriteString(formatTrishnaSection(r.TrishnaBot, r.TrishnaServices))
+	b.WriteString("```\n**shawnb Bot Status**\n```\n")
+	b.WriteString(formatShawnbSection(r.Shawnb))
 	b.WriteString("```\n**Mac Server Status**\n```\n")
-	b.WriteString(formatHostSection(host, hostErr))
+	b.WriteString(formatServerSection(r.Host, r.HostErr, r.Ollama))
 	b.WriteString("```")
 	return b.String()
 }
 
-func formatBotSection(bot runtime.BotSnapshot, services []runtime.ServiceHealth) string {
+func formatTrishnaSection(bot runtime.BotSnapshot, services []runtime.ServiceHealth) string {
 	status := "Starting"
 	if bot.Ready {
 		status = "Online"
@@ -45,29 +53,133 @@ func formatBotSection(bot runtime.BotSnapshot, services []runtime.ServiceHealth)
 	return strings.Join(lines, "\n")
 }
 
-func formatHostSection(host platform.HostSnapshot, hostErr error) string {
-	if hostErr != nil {
-		return fmt.Sprintf("error: %v", hostErr)
+func formatShawnbSection(shawnb monitor.Status) string {
+	status := "Offline"
+	if shawnb.Running {
+		status = "Online"
 	}
-	if !host.Available {
+
+	model := shawnb.Model
+	if model == "" {
+		model = "n/a"
+	}
+
+	lines := []string{
+		line("Status", status),
+		line("Discord", shawnb.Detail),
+		line("Model", model),
+	}
+	if shawnb.Uptime > 0 {
+		lines = append(lines, line("Uptime", platform.FormatDuration(shawnb.Uptime)))
+	}
+	if shawnb.Goroutines > 0 {
+		lines = append(lines, line("Goroutines", fmt.Sprintf("%d", shawnb.Goroutines)))
+	}
+	if shawnb.ProcessCPUPercent > 0 || shawnb.ProcessRSS > 0 {
+		lines = append(lines, line("Process CPU", formatShawnbCPU(shawnb.ProcessCPUPercent)))
+		lines = append(lines, line("Process RAM", formatShawnbRAM(shawnb.ProcessRSS)))
+	}
+	if shawnb.LastOK != nil {
+		lines = append(lines, line("Heartbeat", platform.FormatDuration(time.Since(*shawnb.LastOK))+" ago"))
+	}
+	if shawnb.LastError != "" {
+		lines = append(lines, line("Error", shawnb.LastError))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatShawnbCPU(cpu float64) string {
+	if cpu <= 0 {
+		return "n/a"
+	}
+	return platform.FormatPercent(cpu)
+}
+
+func formatShawnbRAM(rss uint64) string {
+	if rss == 0 {
+		return "n/a"
+	}
+	return platform.FormatBytes(rss)
+}
+
+func formatServerSection(host platform.HostSnapshot, hostErr error, ollamaStatus ollama.Status) string {
+	var sections []string
+
+	if hostErr != nil {
+		sections = append(sections, fmt.Sprintf("error: %v", hostErr))
+	} else if !host.Available {
 		msg := host.Unavailable
 		if msg == "" {
 			msg = "host metrics unavailable"
 		}
-		return msg
+		sections = append(sections, msg)
+	} else {
+		sections = append(sections, strings.Join([]string{
+			line("Host", host.Hostname),
+			line("Uptime", platform.FormatDuration(host.Uptime)),
+			line("System", formatSystem(host)),
+			line("CPU", fmt.Sprintf("%d cores · %s", host.CPUCores, platform.FormatPercent(host.CPUPercent))),
+			line("Memory", formatMemory(host)),
+			line("GPU", formatGPU(host)),
+			line("Load Avg", formatLoad(host)),
+			line("Storage", formatDisks(host.Disks)),
+		}, "\n"))
+	}
+
+	sections = append(sections, formatOllamaSection(ollamaStatus))
+	return strings.Join(sections, "\n\n")
+}
+
+func formatOllamaSection(status ollama.Status) string {
+	ollamaState := "stopped"
+	if status.Available {
+		ollamaState = "running"
+	}
+
+	configured := status.ConfiguredModel
+	if configured == "" {
+		configured = "n/a"
 	}
 
 	lines := []string{
-		line("Host", host.Hostname),
-		line("Uptime", platform.FormatDuration(host.Uptime)),
-		line("System", formatSystem(host)),
-		line("CPU", fmt.Sprintf("%d cores · %s", host.CPUCores, platform.FormatPercent(host.CPUPercent))),
-		line("Memory", formatMemory(host)),
-		line("GPU", formatGPU(host)),
-		line("Load Avg", formatLoad(host)),
-		line("Storage", formatDisks(host.Disks)),
+		line("Ollama", ollamaState),
+		line("Configured", configured),
+	}
+	if status.Available {
+		if status.Version != "" {
+			lines = append(lines, line("Version", status.Version))
+		}
+		lines = append(lines, line("Loaded", formatOllamaLoadedModels(status.LoadedModels)))
+	}
+	if status.Error != "" {
+		lines = append(lines, line("Error", status.Error))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatOllamaLoadedModels(models []ollama.LoadedModel) string {
+	if len(models) == 0 {
+		return "none (will load on first chat)"
+	}
+
+	parts := make([]string, 0, len(models))
+	for _, model := range models {
+		part := model.Name
+		if model.SizeVRAM > 0 {
+			part += " · " + platform.FormatBytes(uint64(model.SizeVRAM))
+		}
+		if model.ParameterSize != "" {
+			part += " · " + model.ParameterSize
+		}
+		if model.Quantization != "" {
+			part += " " + model.Quantization
+		}
+		if model.ContextLength > 0 {
+			part += " · ctx " + fmt.Sprintf("%d", model.ContextLength)
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "\n              ")
 }
 
 func line(label, value string) string {

@@ -1,8 +1,10 @@
 .DS_Store
 .env
+SOUL.md
 data/
 dist/
 logs/
 tmp/
 coverage.out
 /trishna
+/shawnb

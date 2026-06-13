@@ -10,10 +10,14 @@ import (
 )
 
 const (
-	EnvDiscordToken          = "DISCORD_TOKEN"
-	EnvDiscordGuildID        = "DISCORD_GUILD_ID"
-	EnvLogLevel              = "LOG_LEVEL"
-	EnvStatusAllowedUserIDs  = "STATUS_ALLOWED_USER_IDS"
+	EnvDiscordTrishnaToken  = "DISCORD_TRISHNA_TOKEN"
+	EnvDiscordToken         = "DISCORD_TOKEN" // legacy fallback for Trishna
+	EnvDiscordGuildID       = "DISCORD_GUILD_ID"
+	EnvLogLevel             = "LOG_LEVEL"
+	EnvStatusAllowedUserIDs = "STATUS_ALLOWED_USER_IDS"
+	EnvShawnbHeartbeatPath  = "SHAWNB_HEARTBEAT_PATH"
+	EnvOllamaBaseURL        = "OLLAMA_BASE_URL"
+	EnvOllamaModel          = "OLLAMA_MODEL"
 )
 
 type Config struct {
@@ -30,9 +34,12 @@ func LoadFromEnv() (Config, error) {
 }
 
 func LoadFromLookupEnv(lookup LookupEnv) (Config, error) {
-	token, ok := lookupTrimmed(lookup, EnvDiscordToken)
+	token, ok := lookupTrimmed(lookup, EnvDiscordTrishnaToken)
 	if !ok {
-		return Config{}, errors.New("DISCORD_TOKEN is required")
+		token, ok = lookupTrimmed(lookup, EnvDiscordToken)
+	}
+	if !ok {
+		return Config{}, errors.New("DISCORD_TRISHNA_TOKEN is required")
 	}
 
 	cfg := Config{

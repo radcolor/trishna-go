@@ -11,14 +11,14 @@ func TestLoadFromLookupEnvRequiresDiscordToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing token error")
 	}
-	if !strings.Contains(err.Error(), "DISCORD_TOKEN") {
+	if !strings.Contains(err.Error(), "DISCORD_TRISHNA_TOKEN") {
 		t.Fatalf("expected token error, got %v", err)
 	}
 }
 
 func TestLoadFromLookupEnvDefaults(t *testing.T) {
 	cfg, err := LoadFromLookupEnv(mapLookup(map[string]string{
-		EnvDiscordToken: " token ",
+		EnvDiscordTrishnaToken: " token ",
 	}))
 	if err != nil {
 		t.Fatalf("load config: %v", err)
@@ -34,9 +34,21 @@ func TestLoadFromLookupEnvDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadFromLookupEnvLegacyDiscordTokenFallback(t *testing.T) {
+	cfg, err := LoadFromLookupEnv(mapLookup(map[string]string{
+		EnvDiscordToken: "legacy-token",
+	}))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.DiscordToken != "legacy-token" {
+		t.Fatalf("token = %q", cfg.DiscordToken)
+	}
+}
+
 func TestLoadFromLookupEnvOptionalGuildAndLogLevel(t *testing.T) {
 	cfg, err := LoadFromLookupEnv(mapLookup(map[string]string{
-		EnvDiscordToken:   "token",
+		EnvDiscordTrishnaToken: "token",
 		EnvDiscordGuildID: "123456789",
 		EnvLogLevel:       "debug",
 	}))
@@ -56,7 +68,7 @@ func TestLoadFromLookupEnvOptionalGuildAndLogLevel(t *testing.T) {
 
 func TestLoadFromLookupEnvRejectsInvalidGuild(t *testing.T) {
 	_, err := LoadFromLookupEnv(mapLookup(map[string]string{
-		EnvDiscordToken:   "token",
+		EnvDiscordTrishnaToken: "token",
 		EnvDiscordGuildID: "not-a-snowflake",
 	}))
 	if err == nil {

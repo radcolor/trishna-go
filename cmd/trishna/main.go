@@ -10,11 +10,13 @@ import (
 
 	trishnabot "github.com/radcolor/trishna-go/internal/bot"
 	"github.com/radcolor/trishna-go/internal/config"
+	"github.com/radcolor/trishna-go/internal/llm/ollama"
 	"github.com/radcolor/trishna-go/internal/modules"
 	"github.com/radcolor/trishna-go/internal/modules/ping"
 	"github.com/radcolor/trishna-go/internal/modules/status"
 	"github.com/radcolor/trishna-go/internal/modules/youtube"
 	"github.com/radcolor/trishna-go/internal/runtime"
+	"github.com/radcolor/trishna-go/internal/shawnb/monitor"
 )
 
 func main() {
@@ -45,12 +47,17 @@ func run() error {
 		return err
 	}
 
+	shawnbMonitor := monitor.New(os.Getenv(config.EnvShawnbHeartbeatPath))
+	ollamaMonitor := ollama.NewMonitor(os.Getenv(config.EnvOllamaBaseURL), os.Getenv(config.EnvOllamaModel))
+
 	registry, err := modules.NewRegistry(
 		ping.New(),
 		status.New(status.Deps{
-			Runtime:   runtimeState,
-			Services:  []runtime.HealthReporter{ytService},
-			Allowlist: allowlist,
+			Runtime:         runtimeState,
+			TrishnaServices: []runtime.HealthReporter{ytService},
+			Shawnb:          shawnbMonitor,
+			Ollama:          ollamaMonitor,
+			Allowlist:       allowlist,
 		}),
 	)
 	if err != nil {
@@ -60,7 +67,11 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	app, err := trishnabot.New(cfg, registry, logger, runtimeState, ytService)
+	app, err := trishnabot.New(cfg, registry, logger, runtimeState, trishnabot.Options{
+		LogName:  "trishna",
+		Username: "trishna",
+		Activity: "i like touching people...",
+	}, ytService)
 	if err != nil {
 		return err
 	}
