@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	"github.com/disgoorg/disgo"
 	disgobot "github.com/disgoorg/disgo/bot"
@@ -14,13 +15,14 @@ import (
 )
 
 type App struct {
-	client   *disgobot.Client
-	registry *modules.Registry
-	cfg      config.Config
-	logger   *slog.Logger
+	client    *disgobot.Client
+	registry  *modules.Registry
+	cfg       config.Config
+	logger    *slog.Logger
+	services  []modules.BackgroundService
 }
 
-func New(cfg config.Config, registry *modules.Registry, logger *slog.Logger) (*App, error) {
+func New(cfg config.Config, registry *modules.Registry, logger *slog.Logger, services ...modules.BackgroundService) (*App, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -42,10 +44,25 @@ func New(cfg config.Config, registry *modules.Registry, logger *slog.Logger) (*A
 		registry: registry,
 		cfg:      cfg,
 		logger:   logger,
+		services: append([]modules.BackgroundService(nil), services...),
 	}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
+	var wg sync.WaitGroup
+	for _, service := range a.services {
+		wg.Add(1)
+		go func(svc modules.BackgroundService) {
+			defer wg.Done()
+			if err := svc.Run(ctx); err != nil && ctx.Err() == nil {
+				a.logger.Error("background service stopped",
+					slog.String("service", svc.Name()),
+					slog.String("error", err.Error()),
+				)
+			}
+		}(service)
+	}
+
 	if err := a.syncCommands(); err != nil {
 		return err
 	}
@@ -57,6 +74,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.logger.Info("trishna running")
 	<-ctx.Done()
 	a.logger.Info("trishna shutting down")
+	wg.Wait()
 	return nil
 }
 

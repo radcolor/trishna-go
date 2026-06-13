@@ -12,6 +12,7 @@ import (
 	"github.com/radcolor/trishna-go/internal/config"
 	"github.com/radcolor/trishna-go/internal/modules"
 	"github.com/radcolor/trishna-go/internal/modules/ping"
+	"github.com/radcolor/trishna-go/internal/modules/youtube"
 )
 
 func main() {
@@ -40,7 +41,12 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	app, err := trishnabot.New(cfg, registry, logger)
+	ytService, err := youtube.NewService(logger)
+	if err != nil {
+		return err
+	}
+
+	app, err := trishnabot.New(cfg, registry, logger, ytService)
 	if err != nil {
 		return err
 	}
