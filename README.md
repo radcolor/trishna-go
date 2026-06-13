@@ -63,7 +63,7 @@ Trishna `/status` includes a **shawnb** section (Discord connection via heartbea
 
 `DISCORD_WEBHOOK_SHNKPLAYS` is optional. When set, Trishna polls the hardcoded shnk YouTube channel every 5 seconds and posts new uploads or live streams to that Discord webhook. The bot does not post these updates itself; Discord receives them through the webhook URL.
 
-`STATUS_ALLOWED_USER_IDS` is optional. When set, only those Discord user IDs can run `/status`. When unset, anyone can use it.
+`STATUS_ALLOWED_USER_IDS` is required for Trishna. Only those Discord user IDs can run `/status`.
 
 `SHAWNB_ALLOWED_USER_IDS` is required for shawnb. Only those users can chat with the bot.
 

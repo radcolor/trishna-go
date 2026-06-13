@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	disgobot "github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/discord"
@@ -15,13 +16,17 @@ import (
 
 	"github.com/radcolor/trishna-go/internal/chatlog"
 	"github.com/radcolor/trishna-go/internal/llm/ollama"
+	"github.com/radcolor/trishna-go/internal/llm/prompt"
+	"github.com/radcolor/trishna-go/internal/ratelimit"
 )
 
 const (
 	ModuleName        = "chat"
 	ResetCommandName  = "reset"
 	fallbackReply     = "I'm having trouble replying right now. Try again in a moment."
+	rateLimitReply    = "You're sending messages too fast — give me a moment."
 	maxDiscordMessage = 2000
+	chatLLMCooldown   = 3 * time.Second
 )
 
 type LLM interface {
@@ -56,6 +61,7 @@ type Module struct {
 	history         *conversationHistory
 	reminder        ReminderHandler
 	ownerNotifier   OwnerNotifier
+	llmCooldown     *ratelimit.Cooldown
 }
 
 type conversationHistory struct {
@@ -93,6 +99,7 @@ func New(deps Deps) Module {
 		logger:          logger,
 		reminder:        deps.Reminder,
 		ownerNotifier:   deps.OwnerNotifier,
+		llmCooldown:     ratelimit.NewCooldown(chatLLMCooldown),
 		history: &conversationHistory{
 			limit: limit,
 			byKey: make(map[string][]ollama.Message),
@@ -147,7 +154,7 @@ func (m Module) handleMessageCreate(event *events.MessageCreate) {
 		return
 	}
 
-	content := strings.TrimSpace(event.Message.Content)
+	content := prompt.TruncateInput(strings.TrimSpace(event.Message.Content))
 	if content == "" {
 		return
 	}
@@ -182,6 +189,16 @@ func (m Module) handleMessageCreate(event *events.MessageCreate) {
 	}
 
 	history := m.snapshotHistory(userID, channelID)
+	if m.llmCooldown != nil && !m.llmCooldown.Allow(userID.String()) {
+		reply := trimForDiscord(rateLimitReply)
+		m.appendHistory(userID, channelID, ollama.Message{Role: "assistant", Content: reply})
+		m.logMessage(userID, channelID, isDM, "assistant", reply)
+		if _, err := event.Client().Rest.CreateMessage(channelID, discord.MessageCreate{Content: reply}, rest.WithCtx(ctx)); err != nil {
+			m.logger.Error("send rate limit reply failed", slog.String("error", err.Error()))
+		}
+		return
+	}
+
 	reply, err := m.llm.Chat(ctx, history)
 	if err != nil {
 		m.logger.Error("ollama chat failed", slog.String("error", err.Error()))
@@ -265,6 +282,7 @@ func (m Module) logMessage(userID, channelID snowflake.ID, isDM bool, role, cont
 }
 
 func trimForDiscord(content string) string {
+	content = prompt.SanitizeDiscordOutput(content)
 	content = strings.TrimSpace(content)
 	if len(content) <= maxDiscordMessage {
 		return content

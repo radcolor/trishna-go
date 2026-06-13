@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/radcolor/trishna-go/internal/llm/prompt"
 )
 
 const defaultBaseURL = "http://127.0.0.1:11434"
@@ -54,6 +56,9 @@ func NewClient(baseURL, model, systemPrompt string) (*Client, error) {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
+	if err := ValidateLocalhostBaseURL(baseURL); err != nil {
+		return nil, err
+	}
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return nil, fmt.Errorf("ollama model is required")
@@ -66,7 +71,7 @@ func NewClient(baseURL, model, systemPrompt string) (*Client, error) {
 	return &Client{
 		baseURL: baseURL,
 		model:   model,
-		system:  systemPrompt,
+		system:  prompt.AppendChatSecurity(systemPrompt),
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
@@ -80,8 +85,18 @@ func (c *Client) Soul() string {
 func (c *Client) Chat(ctx context.Context, history []Message) (string, error) {
 	messages := make([]Message, 0, 1+len(history))
 	messages = append(messages, Message{Role: "system", Content: c.system})
-	messages = append(messages, history...)
-	return c.completeMessages(ctx, messages)
+	for _, item := range history {
+		content := item.Content
+		if item.Role == "user" {
+			content = prompt.WrapUserContent(content)
+		}
+		messages = append(messages, Message{Role: item.Role, Content: content})
+	}
+	reply, err := c.completeMessages(ctx, messages)
+	if err != nil {
+		return "", err
+	}
+	return prompt.SanitizeDiscordOutput(reply), nil
 }
 
 func (c *Client) Complete(ctx context.Context, system, user string) (string, error) {
@@ -95,7 +110,7 @@ func (c *Client) Complete(ctx context.Context, system, user string) (string, err
 	}
 	return c.completeMessages(ctx, []Message{
 		{Role: "system", Content: system},
-		{Role: "user", Content: user},
+		{Role: "user", Content: prompt.WrapUserContent(user)},
 	})
 }
 

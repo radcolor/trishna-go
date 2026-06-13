@@ -46,6 +46,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if len(allowlist) == 0 {
+		return fmt.Errorf("%s is required", config.EnvStatusAllowedUserIDs)
+	}
 
 	shawnbMonitor := monitor.New(os.Getenv(config.EnvShawnbHeartbeatPath))
 	ollamaMonitor := ollama.NewMonitor(os.Getenv(config.EnvOllamaBaseURL), os.Getenv(config.EnvOllamaModel))

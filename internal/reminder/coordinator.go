@@ -10,6 +10,8 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/radcolor/trishna-go/internal/chatlog"
+	"github.com/radcolor/trishna-go/internal/llm/prompt"
+	"github.com/radcolor/trishna-go/internal/ratelimit"
 )
 
 type SoulLLM interface {
@@ -17,12 +19,15 @@ type SoulLLM interface {
 	Soul() string
 }
 
+const reminderParseCooldown = 15 * time.Second
+
 type Coordinator struct {
-	parser  *Parser
-	store   *Store
-	llm     SoulLLM
-	chatLog *chatlog.Store
-	logger  *slog.Logger
+	parser   *Parser
+	store    *Store
+	llm      SoulLLM
+	chatLog  *chatlog.Store
+	logger   *slog.Logger
+	cooldown *ratelimit.Cooldown
 }
 
 func NewCoordinator(parser *Parser, store *Store, llm SoulLLM, chatLog *chatlog.Store, logger *slog.Logger) *Coordinator {
@@ -30,15 +35,20 @@ func NewCoordinator(parser *Parser, store *Store, llm SoulLLM, chatLog *chatlog.
 		logger = slog.Default()
 	}
 	return &Coordinator{
-		parser:  parser,
-		store:   store,
-		llm:     llm,
-		chatLog: chatLog,
-		logger:  logger,
+		parser:   parser,
+		store:    store,
+		llm:      llm,
+		chatLog:  chatLog,
+		logger:   logger,
+		cooldown: ratelimit.NewCooldown(reminderParseCooldown),
 	}
 }
 
 func (c *Coordinator) TrySchedule(ctx context.Context, userID, channelID snowflake.ID, message string) (handled bool, reply string, err error) {
+	if c.cooldown != nil && !c.cooldown.Allow(userID.String()) {
+		return false, "", nil
+	}
+
 	result, err := c.parser.Parse(ctx, message)
 	if err != nil {
 		c.logger.Debug("reminder parse skipped", slog.String("error", err.Error()))
@@ -80,20 +90,28 @@ func (c *Coordinator) craftScheduleConfirm(ctx context.Context, event string, du
 		loc = time.UTC
 	}
 	when := dueAt.In(loc).Format("Mon Jan 2, 3:04 PM MST")
-	prompt := fmt.Sprintf(
+	userPrompt := fmt.Sprintf(
 		"The user just asked for a reminder about %q at %s (Asia/Kolkata). The reminder is already scheduled. Reply briefly in your usual tone confirming you'll ping them then. One short message only.",
 		event,
 		when,
 	)
-	return c.llm.Complete(ctx, c.llm.Soul(), prompt)
+	reply, err := c.llm.Complete(ctx, c.llm.Soul(), userPrompt)
+	if err != nil {
+		return "", err
+	}
+	return prompt.SanitizeDiscordOutput(reply), nil
 }
 
 func (c *Coordinator) craftCancelConfirm(ctx context.Context, removed int) (string, error) {
-	prompt := fmt.Sprintf(
+	userPrompt := fmt.Sprintf(
 		"The user asked to cancel their reminders. You cleared %d pending reminder(s). Reply briefly confirming they're cancelled. One short message only.",
 		removed,
 	)
-	return c.llm.Complete(ctx, c.llm.Soul(), prompt)
+	reply, err := c.llm.Complete(ctx, c.llm.Soul(), userPrompt)
+	if err != nil {
+		return "", err
+	}
+	return prompt.SanitizeDiscordOutput(reply), nil
 }
 
 func fallbackScheduleReply(event string, dueAt time.Time) string {
@@ -113,6 +131,7 @@ func fallbackCancelReply(removed int) string {
 }
 
 func trimForDiscord(content string) string {
+	content = prompt.SanitizeDiscordOutput(content)
 	content = strings.TrimSpace(content)
 	if len(content) <= maxDiscordMessage {
 		return content

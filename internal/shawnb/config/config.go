@@ -10,6 +10,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/radcolor/trishna-go/internal/config"
+	"github.com/radcolor/trishna-go/internal/llm/ollama"
 )
 
 const (
@@ -147,6 +148,10 @@ func LoadFromLookupEnv(lookup LookupEnv) (Config, error) {
 			return Config{}, fmt.Errorf("parse SHAWNB_HISTORY_LIMIT: %q", rawLimit)
 		}
 		cfg.HistoryLimit = limit
+	}
+
+	if err := ollama.ValidateLocalhostBaseURL(cfg.OllamaBaseURL); err != nil {
+		return Config{}, fmt.Errorf("invalid OLLAMA_BASE_URL: %w", err)
 	}
 
 	return cfg, nil

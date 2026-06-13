@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/radcolor/trishna-go/internal/llm/prompt"
 )
 
 const parseSystemPrompt = `You decide if the bot owner (human operator, offline) should receive a Discord DM about a chat user's message.
@@ -51,7 +53,7 @@ func (p *Parser) Parse(ctx context.Context, message string) (Result, error) {
 		return Result{}, nil
 	}
 
-	raw, err := p.llm.Complete(ctx, parseSystemPrompt, "User message:\n"+message)
+	raw, err := p.llm.Complete(ctx, prompt.AppendStructuredSecurity(parseSystemPrompt), "User message:\n"+message)
 	if err != nil {
 		return Result{}, err
 	}
@@ -68,10 +70,8 @@ func (p *Parser) Parse(ctx context.Context, message string) (Result, error) {
 	summary := strings.TrimSpace(parsed.Summary)
 	if summary == "" {
 		summary = message
-		if len(summary) > 200 {
-			summary = summary[:197] + "..."
-		}
 	}
+	summary = prompt.TruncateSummary(summary)
 
 	return Result{
 		Notify:   true,

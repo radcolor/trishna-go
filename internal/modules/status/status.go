@@ -124,7 +124,7 @@ func (m Module) HandleInteraction(event *handler.CommandEvent) error {
 
 func (m Module) allowed(userID snowflake.ID) bool {
 	if len(m.allowlist) == 0 {
-		return true
+		return false
 	}
 	_, ok := m.allowlist[userID]
 	return ok

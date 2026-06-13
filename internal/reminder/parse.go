@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/radcolor/trishna-go/internal/llm/prompt"
 )
 
 const parseSystemPrompt = `You extract reminder intent from chat messages.
@@ -82,7 +84,7 @@ func (p *Parser) Parse(ctx context.Context, message string) (ParseResult, error)
 		message,
 	)
 
-	raw, err := p.llm.Complete(ctx, parseSystemPrompt, userPrompt)
+	raw, err := p.llm.Complete(ctx, prompt.AppendStructuredSecurity(parseSystemPrompt), userPrompt)
 	if err != nil {
 		return ParseResult{}, err
 	}
@@ -99,7 +101,7 @@ func (p *Parser) Parse(ctx context.Context, message string) (ParseResult, error)
 		return ParseResult{Kind: ParseNone}, nil
 	}
 
-	event := strings.TrimSpace(parsed.Event)
+	event := prompt.TruncateEvent(strings.TrimSpace(parsed.Event))
 	if event == "" {
 		return ParseResult{Kind: ParseNone}, fmt.Errorf("reminder missing event")
 	}

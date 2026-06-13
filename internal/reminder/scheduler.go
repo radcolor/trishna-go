@@ -12,6 +12,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/radcolor/trishna-go/internal/chatlog"
+	"github.com/radcolor/trishna-go/internal/llm/prompt"
 	"github.com/radcolor/trishna-go/internal/runtime"
 )
 
@@ -129,17 +130,17 @@ func (s *Scheduler) craftReminder(ctx context.Context, item Reminder) (string, e
 		loc = time.UTC
 	}
 	when := item.DueAt.In(loc).Format("Mon Jan 2, 3:04 PM MST")
-	prompt := fmt.Sprintf(
+	userPrompt := fmt.Sprintf(
 		"It's time to send a scheduled reminder about: %q. Originally scheduled for %s (Asia/Kolkata). Write a short reminder in your usual tone. One message only.",
 		item.Event,
 		when,
 	)
 	system := s.llm.Soul() + "\n\nYou are sending a scheduled reminder notification, not replying to a live chat."
-	reply, err := s.llm.Complete(ctx, system, prompt)
+	reply, err := s.llm.Complete(ctx, system, userPrompt)
 	if err != nil {
 		return fallbackReminderReply(item.Event), nil
 	}
-	return strings.TrimSpace(reply), nil
+	return prompt.SanitizeDiscordOutput(strings.TrimSpace(reply)), nil
 }
 
 func fallbackReminderReply(event string) string {

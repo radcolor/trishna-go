@@ -6,10 +6,14 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
+
+	"github.com/radcolor/trishna-go/internal/llm/prompt"
+	"github.com/radcolor/trishna-go/internal/ratelimit"
 )
 
 type RESTProvider interface {
@@ -41,11 +45,16 @@ func (p *LazyRESTProvider) CreateMessage(channelID snowflake.ID, create discord.
 	return r.CreateMessage(channelID, create, opts...)
 }
 
+const ownerNotifyCooldown = 2 * time.Minute
+const maxConcurrentNotify = 2
+
 type Notifier struct {
-	parser  *Parser
-	ownerID snowflake.ID
-	rest    RESTProvider
-	logger  *slog.Logger
+	parser    *Parser
+	ownerID   snowflake.ID
+	rest      RESTProvider
+	logger    *slog.Logger
+	cooldown  *ratelimit.Cooldown
+	notifySem chan struct{}
 }
 
 func NewNotifier(parser *Parser, ownerID snowflake.ID, restProvider RESTProvider, logger *slog.Logger) *Notifier {
@@ -53,15 +62,29 @@ func NewNotifier(parser *Parser, ownerID snowflake.ID, restProvider RESTProvider
 		logger = slog.Default()
 	}
 	return &Notifier{
-		parser:  parser,
-		ownerID: ownerID,
-		rest:    restProvider,
-		logger:  logger,
+		parser:    parser,
+		ownerID:   ownerID,
+		rest:      restProvider,
+		logger:    logger,
+		cooldown:  ratelimit.NewCooldown(ownerNotifyCooldown),
+		notifySem: make(chan struct{}, maxConcurrentNotify),
 	}
 }
 
 func (n *Notifier) MaybeNotify(ctx context.Context, userID, channelID snowflake.ID, isDM bool, message string) {
 	if n.ownerID == 0 || n.parser == nil {
+		return
+	}
+	if n.cooldown != nil && !n.cooldown.Allow(userID.String()) {
+		n.logger.Debug("owner notify rate limited", slog.String("user_id", userID.String()))
+		return
+	}
+
+	select {
+	case n.notifySem <- struct{}{}:
+		defer func() { <-n.notifySem }()
+	default:
+		n.logger.Debug("owner notify concurrency limit")
 		return
 	}
 
@@ -102,7 +125,7 @@ func (n *Notifier) send(ctx context.Context, userID, channelID snowflake.ID, isD
 		"**Owner alert** — %s\n\n**User message:**\n> %s\n\n**Note:** %s\n\n_(shawnb · %s · user %s)_",
 		categoryLabel(result.Category),
 		quoteForDiscord(message),
-		result.Summary,
+		prompt.TruncateSummary(result.Summary),
 		surface,
 		userID.String(),
 	)
@@ -130,6 +153,7 @@ func quoteForDiscord(message string) string {
 }
 
 func trimForDiscord(content string) string {
+	content = prompt.SanitizeDiscordOutput(content)
 	content = strings.TrimSpace(content)
 	if len(content) <= maxDiscordMessage {
 		return content

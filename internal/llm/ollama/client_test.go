@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -43,8 +44,14 @@ func TestClientChat(t *testing.T) {
 		if req.Model != "gemma4:e2b" {
 			t.Fatalf("model = %q", req.Model)
 		}
-		if len(req.Messages) != 2 || req.Messages[0].Role != "system" || req.Messages[1].Content != "hey" {
+		if len(req.Messages) != 2 {
 			t.Fatalf("messages = %+v", req.Messages)
+		}
+		if req.Messages[0].Role != "system" || !strings.Contains(req.Messages[0].Content, "Security (always enforced)") {
+			t.Fatalf("system = %+v", req.Messages[0])
+		}
+		if req.Messages[1].Role != "user" || !strings.Contains(req.Messages[1].Content, "BEGIN_USER_MESSAGE") {
+			t.Fatalf("user = %+v", req.Messages[1])
 		}
 
 		_ = json.NewEncoder(w).Encode(chatResponse{
