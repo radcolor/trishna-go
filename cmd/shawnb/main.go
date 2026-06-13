@@ -103,7 +103,7 @@ func run() error {
 	app, err := shawnbot.New(cfg.BotConfig(), registry, logger, runtimeState, shawnbot.Options{
 		LogName:  "shawnb",
 		Username: "shawnb",
-		Activity: "chatting",
+		Activity: "thinking of you...",
 		GatewayConfigOpts: []gateway.ConfigOpt{
 			gateway.WithIntents(
 				gateway.IntentGuilds,
