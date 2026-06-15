@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Regenerate com.radcolor.shawnb.plist EnvironmentVariables from .env (keeps ProgramArguments etc.)
+# Regenerate com.radcolor.trishna.plist EnvironmentVariables from .env (keeps ProgramArguments etc.)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUNTIME_DIR="${TRISHNA_RUNTIME_DIR:-$HOME/Library/Application Support/trishna-go}"
-PLIST_LABEL="com.radcolor.shawnb"
+PLIST_LABEL="com.radcolor.trishna"
 PLIST_DEST="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
 ENV_BLOCK_FILE="$(mktemp)"
 trap 'rm -f "$ENV_BLOCK_FILE"' EXIT
@@ -44,6 +44,6 @@ sed \
   -e "s|@@INSTALL_DIR@@|$RUNTIME_DIR|g" \
   -e "/@@ENV_VARS@@/r $ENV_BLOCK_FILE" \
   -e "/@@ENV_VARS@@/d" \
-  "$SCRIPT_DIR/com.radcolor.shawnb.plist" > "$PLIST_DEST"
+  "$SCRIPT_DIR/com.radcolor.trishna.plist" > "$PLIST_DEST"
 
 chmod 600 "$PLIST_DEST"

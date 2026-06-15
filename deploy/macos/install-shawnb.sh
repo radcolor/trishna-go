@@ -3,13 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+RUNTIME_DIR="${TRISHNA_RUNTIME_DIR:-$HOME/Library/Application Support/trishna-go}"
 PLIST_LABEL="com.radcolor.shawnb"
 PLIST_DEST="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
-ENV_BLOCK_FILE="$(mktemp)"
-trap 'rm -f "$ENV_BLOCK_FILE"' EXIT
 
 echo "Installing shawnb AI chat bot for macOS launchd"
-echo "  install dir: $INSTALL_DIR"
 
 if [ ! -f "$INSTALL_DIR/.env" ]; then
   echo "error: $INSTALL_DIR/.env not found"
@@ -23,16 +21,21 @@ if [ ! -f "$INSTALL_DIR/SOUL.md" ]; then
   exit 1
 fi
 
-mkdir -p "$INSTALL_DIR/dist" "$INSTALL_DIR/logs" "$INSTALL_DIR/data/shawnb/chats"
-rm -f "$INSTALL_DIR/logs/shawnb.log" "$INSTALL_DIR/logs/shawnb.error.log"
-xattr -cr "$INSTALL_DIR/logs" 2>/dev/null || true
-chmod 700 "$INSTALL_DIR/data/shawnb" "$INSTALL_DIR/data/shawnb/chats" 2>/dev/null || true
+mkdir -p "$RUNTIME_DIR/dist" "$RUNTIME_DIR/logs" "$RUNTIME_DIR/data/shawnb/chats"
+rm -f "$RUNTIME_DIR/logs/shawnb.log" "$RUNTIME_DIR/logs/shawnb.error.log"
+cp "$INSTALL_DIR/.env" "$RUNTIME_DIR/.env"
+cp "$INSTALL_DIR/SOUL.md" "$RUNTIME_DIR/SOUL.md"
+if [ -d "$INSTALL_DIR/data/shawnb" ]; then
+  ditto "$INSTALL_DIR/data/shawnb" "$RUNTIME_DIR/data/shawnb"
+fi
+xattr -cr "$RUNTIME_DIR" 2>/dev/null || true
+chmod 700 "$RUNTIME_DIR/data/shawnb" "$RUNTIME_DIR/data/shawnb/chats" 2>/dev/null || true
 
 echo "Building binary..."
 (
   cd "$INSTALL_DIR"
   LDFLAGS="$(sh "$INSTALL_DIR/scripts/ldflags.sh")"
-  go build -trimpath -ldflags="$LDFLAGS" -o "$INSTALL_DIR/dist/shawnb" ./cmd/shawnb
+  go build -trimpath -ldflags="$LDFLAGS" -o "$RUNTIME_DIR/dist/shawnb" ./cmd/shawnb
 )
 
 echo "Writing launch agent..."
@@ -56,13 +59,14 @@ fi
 
 echo
 echo "shawnb installed and started."
-echo "  logs: $INSTALL_DIR/logs/shawnb.log"
-echo "  errors: $INSTALL_DIR/logs/shawnb.error.log"
-echo "  chat logs: $INSTALL_DIR/data/shawnb/chats/"
+echo "  runtime: $RUNTIME_DIR"
+echo "  logs: $RUNTIME_DIR/logs/shawnb.log"
+echo "  errors: $RUNTIME_DIR/logs/shawnb.error.log"
+echo "  chat logs: $RUNTIME_DIR/data/shawnb/chats/"
 echo
 echo "Useful commands:"
 echo "  ./deploy/macos/status-shawnb.sh"
-echo "  tail -f $INSTALL_DIR/logs/shawnb.log"
-echo "  tail -f $INSTALL_DIR/data/shawnb/chats/\$(date +%F).jsonl"
+echo "  tail -f \"$RUNTIME_DIR/logs/shawnb.log\""
+echo "  tail -f \"$RUNTIME_DIR/data/shawnb/chats/\$(date +%F).jsonl\""
 echo "  ./deploy/macos/restart-shawnb.sh"
 echo "  ./deploy/macos/uninstall-shawnb.sh"

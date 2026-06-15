@@ -14,4 +14,4 @@ if [ -f "$PLIST_DEST" ]; then
 fi
 
 echo "shawnb launch agent removed."
-echo "Binary, logs, and chat data were left in place."
+echo "Runtime binary, logs, and chat data were left in place."

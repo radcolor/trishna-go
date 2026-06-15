@@ -14,4 +14,4 @@ if [ -f "$PLIST_DEST" ]; then
 fi
 
 echo "Trishna launch agent removed."
-echo "Binary, logs, and data were left in place."
+echo "Runtime binary, logs, and data were left in place."

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -22,7 +23,6 @@ func NewWebhookClient() *WebhookClient {
 }
 
 func (c *WebhookClient) PostVideo(webhookURL string, video Video) error {
-	live := isLiveStream(video.Title)
 	embed := webhookEmbed{
 		Color: embedColorYouTube,
 		Title: video.Title,
@@ -37,13 +37,6 @@ func (c *WebhookClient) PostVideo(webhookURL string, video Video) error {
 
 	payload := webhookPayload{
 		Embeds: []webhookEmbed{embed},
-		Components: []webhookActionRow{{
-			Components: []webhookButton{{
-				Style: 5,
-				Label: watchButtonLabel(live),
-				URL:   video.URL,
-			}},
-		}},
 	}
 
 	body, err := json.Marshal(payload)
@@ -64,7 +57,12 @@ func (c *WebhookClient) PostVideo(webhookURL string, video Video) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("post webhook: %s", resp.Status)
+		errorBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		detail := strings.TrimSpace(string(errorBody))
+		if detail == "" {
+			return fmt.Errorf("post webhook: %s", resp.Status)
+		}
+		return fmt.Errorf("post webhook: %s: %s", resp.Status, detail)
 	}
 	return nil
 }
@@ -113,8 +111,7 @@ func watchButtonLabel(live bool) string {
 }
 
 type webhookPayload struct {
-	Embeds     []webhookEmbed     `json:"embeds"`
-	Components []webhookActionRow `json:"components"`
+	Embeds []webhookEmbed `json:"embeds"`
 }
 
 type webhookEmbed struct {
@@ -127,14 +124,4 @@ type webhookEmbed struct {
 
 type webhookImage struct {
 	URL string `json:"url"`
-}
-
-type webhookActionRow struct {
-	Components []webhookButton `json:"components"`
-}
-
-type webhookButton struct {
-	Style int    `json:"style"`
-	Label string `json:"label"`
-	URL   string `json:"url"`
 }
