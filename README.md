@@ -1,6 +1,6 @@
 # Trishna Go
 
-Trishna is a modular personal bot platform written in Go. It runs two separate Discord bots as independent processes:
+Trishna is a modular personal bot platform written in Go. It runs independent adapters in one process where possible, so one platform can fail without stopping the others. It currently includes two Discord bots:
 
 - **Trishna** — slash commands, Mac Mini `/status`, YouTube webhook notifications
 - **shawnb** — Ollama AI chat bot with a gitignored `SOUL.md` personality file, DMs and allowed channels, chat logs, reminders, and owner alerts
@@ -16,6 +16,7 @@ Trishna is a modular personal bot platform written in Go. It runs two separate D
 - `/ping` command
 - `/status` command (bot uptime, version, process stats, Mac Mini CPU/RAM/SSD, services)
 - YouTube RSS poller with Discord webhook notifications
+- YouTube live chat stream bot with basic `!` commands
 - Docker build target
 
 ### shawnb (`cmd/shawnb`)
@@ -38,6 +39,14 @@ DISCORD_TRISHNA_TOKEN=your-trishna-bot-token
 DISCORD_GUILD_ID=optional-dev-guild-id
 LOG_LEVEL=info
 DISCORD_WEBHOOK_SHNKPLAYS=https://discord.com/api/webhooks/...
+YOUTUBE_CHAT_ENABLED=false
+YOUTUBE_CLIENT_ID=your-google-oauth-client-id
+YOUTUBE_CLIENT_SECRET=your-google-oauth-client-secret
+YOUTUBE_TOKEN_PATH=data/youtube-token.json
+YOUTUBE_OWNER_CHANNEL_IDS=your-youtube-channel-id
+YOUTUBE_LIVE_VIDEO_ID=optional-live-video-id
+STREAMBOT_STATE_PATH=data/streambot/state.json
+STREAMBOT_RESPONSES_DIR=data/streambot/responses
 STATUS_ALLOWED_USER_IDS=
 
 DISCORD_SHAWNB_TOKEN=your-shawnb-bot-token
@@ -53,7 +62,7 @@ SHAWNB_HEARTBEAT_PATH=data/shawnb/heartbeat.json
 SHAWNB_HISTORY_LIMIT=20
 ```
 
-`DISCORD_TRISHNA_TOKEN` is required for Trishna. `DISCORD_TOKEN` still works as a legacy fallback.
+`DISCORD_TRISHNA_TOKEN` enables Trishna's Discord adapter. `DISCORD_TOKEN` still works as a legacy fallback. If Discord config is missing or invalid, the process can still run other enabled adapters such as YouTube chat.
 
 Trishna `/status` includes a **shawnb** section (Discord connection via heartbeat file). shawnb writes `data/shawnb/heartbeat.json` every 10 seconds while connected.
 
@@ -63,7 +72,21 @@ Trishna `/status` includes a **shawnb** section (Discord connection via heartbea
 
 `DISCORD_WEBHOOK_SHNKPLAYS` is optional. When set, Trishna polls the hardcoded shnk YouTube channel every 5 seconds and posts new uploads or live streams to that Discord webhook. The bot does not post these updates itself; Discord receives them through the webhook URL.
 
-`STATUS_ALLOWED_USER_IDS` is required for Trishna. Only those Discord user IDs can run `/status`.
+`YOUTUBE_CHAT_ENABLED=true` enables the YouTube stream bot. Run `go run ./cmd/trishna auth youtube` once after setting `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, and `YOUTUBE_TOKEN_PATH`; the command prints a Google consent URL and saves the OAuth token after the browser callback. The OAuth client must allow a loopback redirect URI for desktop apps.
+
+`YOUTUBE_OWNER_CHANNEL_IDS` is a comma-separated list of YouTube channel IDs allowed to run owner-only stream commands such as `!setgame`. Trishna also uses these channel IDs to auto-detect the active public live stream via `/channel/{id}/live` when OAuth's owned-broadcast lookup cannot see the stream.
+
+`YOUTUBE_LIVE_VIDEO_ID` is optional. Set it only when auto-detection cannot find the stream, such as some unlisted/private broadcasts.
+
+Trishna auto-detects the current stream game from the broadcast title and tags. Supported game buckets are `sky`, `valorant`, and `generic`; owner-only `!setgame` can override detection during a stream.
+
+`STREAMBOT_RESPONSES_DIR` points at editable text replies. These optional files override built-in fallback replies:
+
+- `socials.txt`
+- `valorant.txt`
+- `sky.txt`
+
+`STATUS_ALLOWED_USER_IDS` is required when the Discord adapter is enabled. Only those Discord user IDs can run `/status`.
 
 `SHAWNB_ALLOWED_USER_IDS` is required for shawnb. Only those users can chat with the bot.
 
@@ -82,7 +105,7 @@ Trishna `/status` includes a **shawnb** section (Discord connection via heartbea
 Read chat logs later:
 
 ```sh
-tail -f data/shawnb/chats/$(date +%F).jsonl
+tail -f "$HOME/Library/Application Support/trishna-go/data/shawnb/chats/$(date +%F).jsonl"
 ```
 
 Each line is JSON with `role`, `content`, `user_id`, `channel_id`, `is_dm`, and `ts`.
@@ -96,6 +119,38 @@ Each line is JSON with `role`, `content`, `user_id`, `channel_id`, `is_dm`, and 
 5. Start Trishna.
 
 On first run, Trishna records the newest feed entry as a baseline and does not post older videos. After that, only new uploads or live streams are sent. State is stored in `data/youtube-state.json`.
+
+## YouTube Stream Bot Setup
+
+1. Enable YouTube Data API v3 in Google Cloud.
+2. Create an OAuth client for a desktop app.
+3. Set `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_TOKEN_PATH`, and `YOUTUBE_OWNER_CHANNEL_IDS`.
+4. Run:
+
+```sh
+go run ./cmd/trishna auth youtube
+```
+
+5. Open the printed URL, approve access, and wait for the terminal to save the token.
+6. Set `YOUTUBE_CHAT_ENABLED=true` and start Trishna.
+
+Supported live chat commands:
+
+- `!commands`
+- `!game`
+- `!specs`
+- `!crosshair`
+- `!isekai`
+- `!valorant`
+- `!sky`
+- `!generic`
+- `!socials`
+- `!ping` (owner only)
+- `!status` (owner only)
+- `!uptime` (owner only)
+- `!setgame valorant`, `!setgame sky`, or `!setgame generic` (owner only)
+
+When the current game is `valorant`, `sky`, or `generic`, Trishna posts a compact welcome/promo message on connect and every 30 minutes. This keeps YouTube API usage low: one chat poll per YouTube's returned interval plus at most two scheduled promo messages per hour.
 
 ## Run
 
@@ -137,9 +192,9 @@ Trishna writes:
 
 shawnb writes:
 
-- `logs/shawnb.log`
-- `logs/shawnb.error.log`
-- `data/shawnb/chats/YYYY-MM-DD.jsonl`
+- `$HOME/Library/Application Support/trishna-go/logs/shawnb.log`
+- `$HOME/Library/Application Support/trishna-go/logs/shawnb.error.log`
+- `$HOME/Library/Application Support/trishna-go/data/shawnb/chats/YYYY-MM-DD.jsonl`
 
 Useful commands:
 
@@ -147,8 +202,8 @@ Useful commands:
 ./deploy/macos/status.sh
 ./deploy/macos/status-shawnb.sh
 tail -f logs/trishna.log
-tail -f logs/shawnb.log
-tail -f data/shawnb/chats/$(date +%F).jsonl
+tail -f "$HOME/Library/Application Support/trishna-go/logs/shawnb.log"
+tail -f "$HOME/Library/Application Support/trishna-go/data/shawnb/chats/$(date +%F).jsonl"
 ./deploy/macos/restart.sh
 ./deploy/macos/restart-shawnb.sh
 ./deploy/macos/restart-all.sh
@@ -176,6 +231,11 @@ docker run --rm \
   -e DISCORD_TRISHNA_TOKEN="$DISCORD_TRISHNA_TOKEN" \
   -e DISCORD_GUILD_ID="$DISCORD_GUILD_ID" \
   -e DISCORD_WEBHOOK_SHNKPLAYS="$DISCORD_WEBHOOK_SHNKPLAYS" \
+  -e YOUTUBE_CHAT_ENABLED="$YOUTUBE_CHAT_ENABLED" \
+  -e YOUTUBE_CLIENT_ID="$YOUTUBE_CLIENT_ID" \
+  -e YOUTUBE_CLIENT_SECRET="$YOUTUBE_CLIENT_SECRET" \
+  -e YOUTUBE_TOKEN_PATH="/data/youtube-token.json" \
+  -e YOUTUBE_OWNER_CHANNEL_IDS="$YOUTUBE_OWNER_CHANNEL_IDS" \
   -v "$(pwd)/data:/data" \
   trishna-go
 ```
