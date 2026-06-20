@@ -2,17 +2,16 @@ package config
 
 import (
 	"log/slog"
-	"strings"
 	"testing"
 )
 
-func TestLoadFromLookupEnvRequiresDiscordToken(t *testing.T) {
-	_, err := LoadFromLookupEnv(mapLookup(nil))
-	if err == nil {
-		t.Fatal("expected missing token error")
+func TestLoadFromLookupEnvAllowsMissingDiscordToken(t *testing.T) {
+	cfg, err := LoadFromLookupEnv(mapLookup(nil))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
 	}
-	if !strings.Contains(err.Error(), "DISCORD_TRISHNA_TOKEN") {
-		t.Fatalf("expected token error, got %v", err)
+	if cfg.DiscordToken != "" {
+		t.Fatalf("token = %q", cfg.DiscordToken)
 	}
 }
 
@@ -49,8 +48,8 @@ func TestLoadFromLookupEnvLegacyDiscordTokenFallback(t *testing.T) {
 func TestLoadFromLookupEnvOptionalGuildAndLogLevel(t *testing.T) {
 	cfg, err := LoadFromLookupEnv(mapLookup(map[string]string{
 		EnvDiscordTrishnaToken: "token",
-		EnvDiscordGuildID: "123456789",
-		EnvLogLevel:       "debug",
+		EnvDiscordGuildID:      "123456789",
+		EnvLogLevel:            "debug",
 	}))
 	if err != nil {
 		t.Fatalf("load config: %v", err)
@@ -69,7 +68,7 @@ func TestLoadFromLookupEnvOptionalGuildAndLogLevel(t *testing.T) {
 func TestLoadFromLookupEnvRejectsInvalidGuild(t *testing.T) {
 	_, err := LoadFromLookupEnv(mapLookup(map[string]string{
 		EnvDiscordTrishnaToken: "token",
-		EnvDiscordGuildID: "not-a-snowflake",
+		EnvDiscordGuildID:      "not-a-snowflake",
 	}))
 	if err == nil {
 		t.Fatal("expected invalid guild id error")

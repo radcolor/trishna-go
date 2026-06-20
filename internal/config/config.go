@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -38,13 +37,12 @@ func LoadFromLookupEnv(lookup LookupEnv) (Config, error) {
 	if !ok {
 		token, ok = lookupTrimmed(lookup, EnvDiscordToken)
 	}
-	if !ok {
-		return Config{}, errors.New("DISCORD_TRISHNA_TOKEN is required")
-	}
 
 	cfg := Config{
-		DiscordToken: token,
-		LogLevel:     slog.LevelInfo,
+		LogLevel: slog.LevelInfo,
+	}
+	if ok {
+		cfg.DiscordToken = token
 	}
 
 	if rawGuildID, ok := lookupTrimmed(lookup, EnvDiscordGuildID); ok {
