@@ -35,5 +35,9 @@ func (Module) HandleInteraction(event *handler.CommandEvent) error {
 }
 
 func Response() discord.MessageCreate {
-	return discord.MessageCreate{Content: "jihyooo ❤️"}
+	return discord.MessageCreate{Content: ResponseText()}
+}
+
+func ResponseText() string {
+	return "jihyooo ❤️"
 }

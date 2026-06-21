@@ -21,6 +21,7 @@ import (
 
 type Options struct {
 	LogName           string
+	HealthName        string
 	Username          string
 	Activity          string
 	GatewayConfigOpts []gateway.ConfigOpt

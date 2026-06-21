@@ -18,3 +18,9 @@ func TestResponse(t *testing.T) {
 		t.Fatalf("response content = %q", response.Content)
 	}
 }
+
+func TestResponseText(t *testing.T) {
+	if ResponseText() != "jihyooo ❤️" {
+		t.Fatalf("response text = %q", ResponseText())
+	}
+}

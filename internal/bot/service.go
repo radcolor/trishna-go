@@ -7,6 +7,9 @@ import (
 	"sync"
 	"time"
 
+	disgobot "github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/events"
+
 	"github.com/radcolor/trishna-go/internal/config"
 	"github.com/radcolor/trishna-go/internal/modules"
 	"github.com/radcolor/trishna-go/internal/runtime"
@@ -49,6 +52,9 @@ func NewService(cfg config.Config, registry *modules.Registry, logger *slog.Logg
 }
 
 func (s *Service) Name() string {
+	if s.opts.HealthName != "" {
+		return s.opts.HealthName
+	}
 	if s.opts.LogName != "" {
 		return s.opts.LogName
 	}
@@ -74,7 +80,14 @@ func (s *Service) Run(ctx context.Context) error {
 		return nil
 	}
 
-	app, err := New(s.cfg, s.registry, s.logger, s.state, s.opts, s.services...)
+	opts := s.opts
+	opts.ExtraListeners = append([]disgobot.EventListener{
+		disgobot.NewListenerFunc(func(*events.Ready) {
+			s.recordRunning("connected")
+		}),
+	}, opts.ExtraListeners...)
+
+	app, err := New(s.cfg, s.registry, s.logger, s.state, opts, s.services...)
 	if err != nil {
 		s.recordStopped("failed to start", err)
 		<-ctx.Done()

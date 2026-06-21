@@ -2,6 +2,7 @@ package status
 
 import (
 	"fmt"
+	stdhtml "html"
 	"strings"
 	"time"
 
@@ -31,6 +32,25 @@ func BuildMessage(r Report) string {
 	b.WriteString(formatServerSection(r.Host, r.HostErr, r.Ollama))
 	b.WriteString("```")
 	return b.String()
+}
+
+func BuildHTMLMessage(r Report) string {
+	var b strings.Builder
+	writeHTMLSection(&b, "Trishna Bot Status", formatTrishnaSection(r.TrishnaBot, r.TrishnaServices))
+	writeHTMLSection(&b, "shawnb Bot Status", formatShawnbSection(r.Shawnb))
+	writeHTMLSection(&b, "Mac Server Status", formatServerSection(r.Host, r.HostErr, r.Ollama))
+	return b.String()
+}
+
+func writeHTMLSection(b *strings.Builder, title, body string) {
+	if b.Len() > 0 {
+		b.WriteString("\n")
+	}
+	b.WriteString("<b>")
+	b.WriteString(stdhtml.EscapeString(title))
+	b.WriteString("</b>\n<pre>")
+	b.WriteString(stdhtml.EscapeString(body))
+	b.WriteString("</pre>")
 }
 
 func formatTrishnaSection(bot runtime.BotSnapshot, services []runtime.ServiceHealth) string {

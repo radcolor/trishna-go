@@ -17,6 +17,7 @@ import (
 	"github.com/radcolor/trishna-go/internal/modules/youtube"
 	"github.com/radcolor/trishna-go/internal/runtime"
 	"github.com/radcolor/trishna-go/internal/shawnb/monitor"
+	"github.com/radcolor/trishna-go/internal/telegram"
 )
 
 func main() {
@@ -57,16 +58,17 @@ func run() error {
 
 	shawnbMonitor := monitor.New(os.Getenv(config.EnvShawnbHeartbeatPath))
 	ollamaMonitor := ollama.NewMonitor(os.Getenv(config.EnvOllamaBaseURL), os.Getenv(config.EnvOllamaModel))
+	telegramService := telegram.NewServiceFromEnv(logger)
+	statusModule := status.New(status.Deps{
+		Runtime:   runtimeState,
+		Shawnb:    shawnbMonitor,
+		Ollama:    ollamaMonitor,
+		Allowlist: allowlist,
+	})
 
 	registry, err := modules.NewRegistry(
 		ping.New(),
-		status.New(status.Deps{
-			Runtime:         runtimeState,
-			TrishnaServices: []runtime.HealthReporter{ytService, ytChatService},
-			Shawnb:          shawnbMonitor,
-			Ollama:          ollamaMonitor,
-			Allowlist:       allowlist,
-		}),
+		&statusModule,
 	)
 	if err != nil {
 		return err
@@ -76,12 +78,20 @@ func run() error {
 	defer stop()
 
 	discordService := trishnabot.NewService(cfg, registry, logger, runtimeState, trishnabot.Options{
-		LogName:  "trishna",
-		Username: "trishna",
-		Activity: "i like touching people...",
+		LogName:    "trishna",
+		HealthName: "discord",
+		Username:   "trishna",
+		Activity:   "i like touching people...",
+	})
+	statusModule.SetTrishnaServices([]runtime.HealthReporter{discordService, telegramService, ytService, ytChatService})
+	telegramService.SetStatusHandler(func(ctx context.Context) string {
+		return statusModule.ResponseText(ctx)
+	})
+	telegramService.SetHTMLStatusHandler(func(ctx context.Context) string {
+		return statusModule.HTMLResponseText(ctx)
 	})
 
-	return runtime.RunServices(ctx, logger, ytService, ytChatService, discordService)
+	return runtime.RunServices(ctx, logger, ytService, ytChatService, telegramService, discordService)
 }
 
 func newLogger(level slog.Level) *slog.Logger {

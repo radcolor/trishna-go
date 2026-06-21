@@ -23,7 +23,7 @@ func TestCommands(t *testing.T) {
 
 func TestBuildMessage(t *testing.T) {
 	now := time.Now()
-	content := BuildMessage(Report{
+	report := Report{
 		TrishnaBot: runtime.BotSnapshot{
 			Ready:             true,
 			Uptime:            2 * time.Hour,
@@ -87,7 +87,8 @@ func TestBuildMessage(t *testing.T) {
 				UsedPercent: 60,
 			}},
 		},
-	})
+	}
+	content := BuildMessage(report)
 
 	if !strings.Contains(content, "**Trishna Bot Status**") {
 		t.Fatalf("missing trishna header: %q", content)
@@ -115,6 +116,17 @@ func TestBuildMessage(t *testing.T) {
 	}
 	if !strings.Contains(content, "Host:        mac-mini") {
 		t.Fatalf("missing host name: %q", content)
+	}
+
+	htmlContent := BuildHTMLMessage(report)
+	if !strings.Contains(htmlContent, "<b>Trishna Bot Status</b>") {
+		t.Fatalf("missing html trishna header: %q", htmlContent)
+	}
+	if !strings.Contains(htmlContent, "<pre>Status:      Online") {
+		t.Fatalf("missing html pre block: %q", htmlContent)
+	}
+	if strings.Contains(htmlContent, "**Trishna Bot Status**") || strings.Contains(htmlContent, "```") {
+		t.Fatalf("html contains discord markdown: %q", htmlContent)
 	}
 }
 

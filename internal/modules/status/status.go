@@ -68,6 +68,10 @@ func New(deps Deps) Module {
 	}
 }
 
+func (m *Module) SetTrishnaServices(services []runtime.HealthReporter) {
+	m.trishnaServices = append([]runtime.HealthReporter(nil), services...)
+}
+
 func (Module) Name() string {
 	return CommandName
 }
@@ -93,12 +97,34 @@ func (m Module) HandleInteraction(event *handler.CommandEvent) error {
 		})
 	}
 
-	botSnap := m.runtime.BotSnapshot()
-	hostSnap, hostErr := m.host.Snapshot(event.Ctx)
+	return event.CreateMessage(discord.MessageCreate{Content: m.ResponseText(event.Ctx)})
+}
+
+func (m Module) ResponseText(ctx context.Context) string {
+	return BuildMessage(m.Report(ctx))
+}
+
+func (m Module) HTMLResponseText(ctx context.Context) string {
+	return BuildHTMLMessage(m.Report(ctx))
+}
+
+func (m Module) Report(ctx context.Context) Report {
+	var botSnap runtime.BotSnapshot
+	if m.runtime != nil {
+		botSnap = m.runtime.BotSnapshot()
+	}
+
+	var hostSnap platform.HostSnapshot
+	var hostErr error
+	if m.host != nil {
+		hostSnap, hostErr = m.host.Snapshot(ctx)
+	}
 
 	trishnaServices := make([]runtime.ServiceHealth, 0, len(m.trishnaServices))
 	for _, reporter := range m.trishnaServices {
-		trishnaServices = append(trishnaServices, reporter.Health())
+		if reporter != nil {
+			trishnaServices = append(trishnaServices, reporter.Health())
+		}
 	}
 
 	var shawnbStatus monitor.Status
@@ -108,18 +134,17 @@ func (m Module) HandleInteraction(event *handler.CommandEvent) error {
 
 	var ollamaStatus ollama.Status
 	if m.ollama != nil {
-		ollamaStatus = m.ollama.Snapshot(event.Ctx)
+		ollamaStatus = m.ollama.Snapshot(ctx)
 	}
 
-	content := BuildMessage(Report{
+	return Report{
 		TrishnaBot:      botSnap,
 		TrishnaServices: trishnaServices,
 		Shawnb:          shawnbStatus,
 		Ollama:          ollamaStatus,
 		Host:            hostSnap,
 		HostErr:         hostErr,
-	})
-	return event.CreateMessage(discord.MessageCreate{Content: content})
+	}
 }
 
 func (m Module) allowed(userID snowflake.ID) bool {

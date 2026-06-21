@@ -1,8 +1,8 @@
 # Trishna Go
 
-Trishna is a modular personal bot platform written in Go. It runs independent adapters in one process where possible, so one platform can fail without stopping the others. It currently includes two Discord bots:
+Trishna is a modular personal bot platform written in Go. It runs independent adapters in one process where possible, so one platform can fail without stopping the others. It currently includes Discord and Telegram adapters plus a separate Discord chat bot:
 
-- **Trishna** — slash commands, Mac Mini `/status`, YouTube webhook notifications
+- **Trishna** — Discord slash commands, Telegram owner commands, Mac Mini `/status`, YouTube webhook notifications
 - **shawnb** — Ollama AI chat bot with a gitignored `SOUL.md` personality file, DMs and allowed channels, chat logs, reminders, and owner alerts
 
 ## Status
@@ -13,7 +13,8 @@ Trishna is a modular personal bot platform written in Go. It runs independent ad
 - Environment-only config
 - Slash command sync
 - Module registry
-- `/ping` command
+- Discord `/ping` command
+- Telegram owner-only `/ping` command through long polling
 - `/status` command (bot uptime, version, process stats, Mac Mini CPU/RAM/SSD, services)
 - YouTube RSS poller with Discord webhook notifications
 - YouTube live chat stream bot with basic `!` commands
@@ -38,6 +39,17 @@ Copy `.env.example` values into your runtime environment:
 DISCORD_TRISHNA_TOKEN=your-trishna-bot-token
 DISCORD_GUILD_ID=optional-dev-guild-id
 LOG_LEVEL=info
+TELEGRAM_TRISHNA_TOKEN=your-telegram-bot-token
+TELEGRAM_OWNER_USER_IDS=your-telegram-user-id
+TELEGRAM_TRANSPORT=mtproto
+TELEGRAM_MTPROTO_APP_ID=your-telegram-api-id
+TELEGRAM_MTPROTO_APP_HASH=your-telegram-api-hash
+TELEGRAM_MTPROTO_SESSION_PATH=data/telegram/mtproto-session.json
+TELEGRAM_MTPROTO_PROXY_ENABLED=true
+TELEGRAM_MTPROTO_PROXY_HOST=your-mtproxy-host
+TELEGRAM_MTPROTO_PROXY_PORT=443
+TELEGRAM_MTPROTO_PROXY_SECRET=your-mtproxy-secret-hex
+TELEGRAM_API_BASE_URL=
 DISCORD_WEBHOOK_SHNKPLAYS=https://discord.com/api/webhooks/...
 YOUTUBE_CHAT_ENABLED=false
 YOUTUBE_CLIENT_ID=your-google-oauth-client-id
@@ -63,6 +75,12 @@ SHAWNB_HISTORY_LIMIT=20
 ```
 
 `DISCORD_TRISHNA_TOKEN` enables Trishna's Discord adapter. `DISCORD_TOKEN` still works as a legacy fallback. If Discord config is missing or invalid, the process can still run other enabled adapters such as YouTube chat.
+
+`TELEGRAM_TRISHNA_TOKEN` enables Trishna's Telegram adapter. `TELEGRAM_OWNER_USER_IDS` is required when the Telegram token is set; only those numeric Telegram user IDs can run commands in DMs or groups.
+
+`TELEGRAM_TRANSPORT=mtproto` is the default. It uses Telegram MTProto through MTProxy by default, so `TELEGRAM_MTPROTO_APP_ID`, `TELEGRAM_MTPROTO_APP_HASH`, `TELEGRAM_MTPROTO_PROXY_HOST`, `TELEGRAM_MTPROTO_PROXY_PORT`, and `TELEGRAM_MTPROTO_PROXY_SECRET` are required. The MTProto session is stored at `TELEGRAM_MTPROTO_SESSION_PATH` with `0600` file permissions.
+
+Set `TELEGRAM_MTPROTO_PROXY_ENABLED=false` only when you intentionally want direct MTProto traffic, such as routing Telegram through WireGuard outside Trishna. Set `TELEGRAM_TRANSPORT=botapi` to use the old cloud/local Bot API path; `TELEGRAM_API_BASE_URL` can point to a local Bot API server such as `http://127.0.0.1:8081`.
 
 Trishna `/status` includes a **shawnb** section (Discord connection via heartbeat file). shawnb writes `data/shawnb/heartbeat.json` every 10 seconds while connected.
 
