@@ -24,7 +24,7 @@ func (s *Service) runMTProto(ctx context.Context) error {
 				break
 			}
 			s.recordStopped("mtproto stopped", err)
-			s.logger.Warn("telegram mtproto stopped", slog.String("error", err.Error()))
+			s.logger.Warn("telegram mtproto stopped", slog.String("error", s.redactTelegramSecrets(err.Error())))
 			if !sleepContext(ctx, retryBackoff) {
 				break
 			}
@@ -37,7 +37,7 @@ func (s *Service) runMTProto(ctx context.Context) error {
 }
 
 func (s *Service) runMTProtoOnce(ctx context.Context) error {
-	if err := ensureSessionDir(s.cfg.MTProto.SessionPath); err != nil {
+	if err := ensureSecureSessionPath(s.cfg.MTProto.SessionPath); err != nil {
 		return err
 	}
 
@@ -140,6 +140,9 @@ func (s *Service) handleMTProtoMessage(ctx context.Context, sender *message.Send
 	if !ok || !s.isOwner(userID) {
 		return nil
 	}
+	if !s.isAllowedMTProtoChat(textMessage) {
+		return nil
+	}
 
 	command, ok := parseCommand(textMessage.Message, botUsername)
 	if !ok {
@@ -173,16 +176,80 @@ func messageSenderUserID(msg tg.NotEmptyMessage) (int64, bool) {
 	return peerUser.UserID, true
 }
 
-func ensureSessionDir(path string) error {
+func messageChatID(msg tg.NotEmptyMessage) (int64, bool) {
+	peer := msg.GetPeerID()
+	switch p := peer.(type) {
+	case *tg.PeerUser:
+		if p.UserID <= 0 {
+			return 0, false
+		}
+		return p.UserID, true
+	case *tg.PeerChat:
+		if p.ChatID <= 0 {
+			return 0, false
+		}
+		return -p.ChatID, true
+	case *tg.PeerChannel:
+		if p.ChannelID <= 0 {
+			return 0, false
+		}
+		return -1000000000000 - p.ChannelID, true
+	default:
+		return 0, false
+	}
+}
+
+func (s *Service) isAllowedMTProtoChat(msg tg.NotEmptyMessage) bool {
+	if len(s.chats) == 0 {
+		return true
+	}
+	chatID, ok := messageChatID(msg)
+	return ok && s.isAllowedChat(chatID)
+}
+
+func ensureSecureSessionPath(path string) error {
 	if path == "" {
 		return fmt.Errorf("mtproto session path is required")
 	}
 	dir := filepath.Dir(path)
-	if dir == "." || dir == "" {
+	if dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create mtproto session dir: %w", err)
+		}
+		dirInfo, err := os.Lstat(dir)
+		if err != nil {
+			return fmt.Errorf("stat mtproto session dir: %w", err)
+		}
+		if dirInfo.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("mtproto session dir must not be a symlink")
+		}
+		if !dirInfo.IsDir() {
+			return fmt.Errorf("mtproto session dir is not a directory")
+		}
+		if dirInfo.Mode().Perm() != 0o700 {
+			if err := os.Chmod(dir, 0o700); err != nil {
+				return fmt.Errorf("chmod mtproto session dir: %w", err)
+			}
+		}
+	}
+
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
 		return nil
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create mtproto session dir: %w", err)
+	if err != nil {
+		return fmt.Errorf("stat mtproto session path: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("mtproto session path must not be a symlink")
+	}
+	if info.IsDir() {
+		return fmt.Errorf("mtproto session path is a directory")
+	}
+	if info.Mode().Perm() != 0o600 {
+		if err := os.Chmod(path, 0o600); err != nil {
+			return fmt.Errorf("chmod mtproto session path: %w", err)
+		}
 	}
 	return nil
 }

@@ -8,7 +8,7 @@ PLIST_LABEL="com.radcolor.trishna"
 PLIST_DEST="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
 
 echo "Rebuilding Trishna..."
-mkdir -p "$RUNTIME_DIR/dist" "$RUNTIME_DIR/logs" "$RUNTIME_DIR/data"
+mkdir -p "$RUNTIME_DIR/dist" "$RUNTIME_DIR/logs" "$RUNTIME_DIR/data/telegram"
 cp "$INSTALL_DIR/.env" "$RUNTIME_DIR/.env"
 if [ -f "$INSTALL_DIR/SOUL.md" ]; then
   cp "$INSTALL_DIR/SOUL.md" "$RUNTIME_DIR/SOUL.md"
@@ -17,6 +17,8 @@ if [ -d "$INSTALL_DIR/data" ]; then
   ditto "$INSTALL_DIR/data" "$RUNTIME_DIR/data"
 fi
 xattr -cr "$RUNTIME_DIR" 2>/dev/null || true
+chmod 600 "$RUNTIME_DIR/.env"
+chmod 700 "$RUNTIME_DIR/data" "$RUNTIME_DIR/data/telegram" 2>/dev/null || true
 (
   cd "$INSTALL_DIR"
   LDFLAGS="$(sh "$INSTALL_DIR/scripts/ldflags.sh")"

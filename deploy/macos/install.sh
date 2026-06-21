@@ -15,7 +15,7 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
   exit 1
 fi
 
-mkdir -p "$RUNTIME_DIR/dist" "$RUNTIME_DIR/logs" "$RUNTIME_DIR/data"
+mkdir -p "$RUNTIME_DIR/dist" "$RUNTIME_DIR/logs" "$RUNTIME_DIR/data/telegram"
 rm -f "$RUNTIME_DIR/logs/trishna.log" "$RUNTIME_DIR/logs/trishna.error.log"
 cp "$INSTALL_DIR/.env" "$RUNTIME_DIR/.env"
 if [ -f "$INSTALL_DIR/SOUL.md" ]; then
@@ -25,6 +25,8 @@ if [ -d "$INSTALL_DIR/data" ]; then
   ditto "$INSTALL_DIR/data" "$RUNTIME_DIR/data"
 fi
 xattr -cr "$RUNTIME_DIR" 2>/dev/null || true
+chmod 600 "$RUNTIME_DIR/.env"
+chmod 700 "$RUNTIME_DIR/data" "$RUNTIME_DIR/data/telegram" 2>/dev/null || true
 
 echo "Building binary..."
 (

@@ -27,6 +27,7 @@ const (
 	rateLimitReply    = "You're sending messages too fast — give me a moment."
 	maxDiscordMessage = 2000
 	chatLLMCooldown   = 3 * time.Second
+	typingRefresh     = 4 * time.Second
 )
 
 type LLM interface {
@@ -171,17 +172,19 @@ func (m Module) handleMessageCreate(event *events.MessageCreate) {
 		go m.ownerNotifier.MaybeNotify(ctx, userID, channelID, isDM, content)
 	}
 
-	_ = event.Client().Rest.SendTyping(channelID, rest.WithCtx(ctx))
+	stopTyping := startTyping(ctx, event.Client().Rest, channelID, m.logger)
+	defer stopTyping()
 
 	if m.reminder != nil {
 		handled, confirm, err := m.reminder.TrySchedule(ctx, userID, channelID, content)
 		if err != nil {
 			m.logger.Error("reminder scheduling failed", slog.String("error", err.Error()))
 		} else if handled {
-			confirm = trimForDiscord(confirm)
+			confirm = sanitizeForDiscord(confirm)
 			m.appendHistory(userID, channelID, ollama.Message{Role: "assistant", Content: confirm})
 			m.logMessage(userID, channelID, isDM, "assistant", confirm)
-			if _, err := event.Client().Rest.CreateMessage(channelID, discord.MessageCreate{Content: confirm}, rest.WithCtx(ctx)); err != nil {
+			stopTyping()
+			if err := sendDiscordMessages(ctx, event.Client().Rest, channelID, confirm); err != nil {
 				m.logger.Error("send reminder confirm failed", slog.String("error", err.Error()))
 			}
 			return
@@ -190,10 +193,11 @@ func (m Module) handleMessageCreate(event *events.MessageCreate) {
 
 	history := m.snapshotHistory(userID, channelID)
 	if m.llmCooldown != nil && !m.llmCooldown.Allow(userID.String()) {
-		reply := trimForDiscord(rateLimitReply)
+		reply := sanitizeForDiscord(rateLimitReply)
 		m.appendHistory(userID, channelID, ollama.Message{Role: "assistant", Content: reply})
 		m.logMessage(userID, channelID, isDM, "assistant", reply)
-		if _, err := event.Client().Rest.CreateMessage(channelID, discord.MessageCreate{Content: reply}, rest.WithCtx(ctx)); err != nil {
+		stopTyping()
+		if err := sendDiscordMessages(ctx, event.Client().Rest, channelID, reply); err != nil {
 			m.logger.Error("send rate limit reply failed", slog.String("error", err.Error()))
 		}
 		return
@@ -205,13 +209,50 @@ func (m Module) handleMessageCreate(event *events.MessageCreate) {
 		reply = fallbackReply
 	}
 
-	reply = trimForDiscord(reply)
+	reply = sanitizeForDiscord(reply)
 	m.appendHistory(userID, channelID, ollama.Message{Role: "assistant", Content: reply})
 	m.logMessage(userID, channelID, isDM, "assistant", reply)
 
-	if _, err := event.Client().Rest.CreateMessage(channelID, discord.MessageCreate{Content: reply}, rest.WithCtx(ctx)); err != nil {
+	stopTyping()
+	if err := sendDiscordMessages(ctx, event.Client().Rest, channelID, reply); err != nil {
 		m.logger.Error("send chat reply failed", slog.String("error", err.Error()))
 	}
+}
+
+func sendDiscordMessages(ctx context.Context, sender rest.Rest, channelID snowflake.ID, content string) error {
+	for _, part := range splitForDiscord(content) {
+		if _, err := sender.CreateMessage(channelID, discord.MessageCreate{Content: part}, rest.WithCtx(ctx)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func startTyping(ctx context.Context, sender rest.Rest, channelID snowflake.ID, logger *slog.Logger) context.CancelFunc {
+	ctx, cancel := context.WithCancel(ctx)
+
+	send := func() {
+		if err := sender.SendTyping(channelID, rest.WithCtx(ctx)); err != nil && logger != nil {
+			logger.Debug("send typing failed", slog.String("error", err.Error()))
+		}
+	}
+
+	send()
+	go func() {
+		ticker := time.NewTicker(typingRefresh)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				send()
+			}
+		}
+	}()
+
+	return cancel
 }
 
 func (m Module) allowedSurface(event *events.MessageCreate) bool {
@@ -281,13 +322,51 @@ func (m Module) logMessage(userID, channelID snowflake.ID, isDM bool, role, cont
 	}
 }
 
-func trimForDiscord(content string) string {
+func sanitizeForDiscord(content string) string {
 	content = prompt.SanitizeDiscordOutput(content)
-	content = strings.TrimSpace(content)
-	if len(content) <= maxDiscordMessage {
-		return content
+	return strings.TrimSpace(content)
+}
+
+func splitForDiscord(content string) []string {
+	content = sanitizeForDiscord(content)
+	if content == "" {
+		return nil
 	}
-	return content[:maxDiscordMessage-3] + "..."
+
+	runes := []rune(content)
+	if len(runes) <= maxDiscordMessage {
+		return []string{content}
+	}
+
+	var parts []string
+	for len(runes) > maxDiscordMessage {
+		cut := bestDiscordSplit(runes[:maxDiscordMessage])
+		part := strings.TrimSpace(string(runes[:cut]))
+		if part != "" {
+			parts = append(parts, part)
+		}
+		runes = []rune(strings.TrimSpace(string(runes[cut:])))
+	}
+	if len(runes) > 0 {
+		parts = append(parts, string(runes))
+	}
+	return parts
+}
+
+func bestDiscordSplit(runes []rune) int {
+	minUsefulCut := maxDiscordMessage * 3 / 4
+	for i := len(runes) - 1; i >= minUsefulCut; i-- {
+		switch runes[i] {
+		case '\n':
+			return i + 1
+		}
+	}
+	for i := len(runes) - 1; i >= minUsefulCut; i-- {
+		if runes[i] == ' ' || runes[i] == '\t' {
+			return i + 1
+		}
+	}
+	return maxDiscordMessage
 }
 
 func historyKey(userID, channelID snowflake.ID) string {

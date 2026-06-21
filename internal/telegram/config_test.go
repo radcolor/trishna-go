@@ -6,7 +6,11 @@ import (
 	"testing"
 )
 
-const validTLSMTProxySecretHex = "ee852380f362a09343efb4690c4e17862e676f6f676c652e636f6d"
+const (
+	validSecuredMTProxySecretHex = "ddf05fb7acb549be047a7c585116581418"
+	validSimpleMTProxySecretHex  = "52a493bdfb90eea55739eabff2d92a14"
+	validTLSMTProxySecretHex     = "ee852380f362a09343efb4690c4e17862e676f6f676c652e636f6d"
+)
 
 func TestLoadConfigFromLookupEnvDisabled(t *testing.T) {
 	cfg, err := LoadConfigFromLookupEnv(mapLookup(nil))
@@ -63,7 +67,7 @@ func TestLoadConfigFromLookupEnvMTProto(t *testing.T) {
 		EnvTelegramMTProtoSessionPath: "data/custom-session.json",
 		EnvTelegramMTProxyHost:        "proxy.example.com",
 		EnvTelegramMTProxyPort:        "443",
-		EnvTelegramMTProxySecret:      "0123456789abcdef0123456789abcdef",
+		EnvTelegramMTProxySecret:      validSecuredMTProxySecretHex,
 	}))
 	if err != nil {
 		t.Fatalf("load config: %v", err)
@@ -91,6 +95,21 @@ func TestLoadConfigFromLookupEnvMTProto(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFromLookupEnvMTProtoRejectsSimpleSecret(t *testing.T) {
+	_, err := LoadConfigFromLookupEnv(mapLookup(map[string]string{
+		EnvTelegramTrishnaToken:   "token",
+		EnvTelegramOwnerUserIDs:   "123",
+		EnvTelegramMTProtoAppID:   "12345",
+		EnvTelegramMTProtoAppHash: "apphash",
+		EnvTelegramMTProxyHost:    "proxy.example.com",
+		EnvTelegramMTProxyPort:    "443",
+		EnvTelegramMTProxySecret:  validSimpleMTProxySecretHex,
+	}))
+	if err == nil {
+		t.Fatal("expected simple proxy secret error")
+	}
+}
+
 func TestLoadConfigFromLookupEnvMTProtoBase64URLSecret(t *testing.T) {
 	rawSecret, err := hex.DecodeString(validTLSMTProxySecretHex)
 	if err != nil {
@@ -111,6 +130,48 @@ func TestLoadConfigFromLookupEnvMTProtoBase64URLSecret(t *testing.T) {
 	}
 	if got := hex.EncodeToString(cfg.MTProto.ProxySecret); got != validTLSMTProxySecretHex {
 		t.Fatalf("proxy secret = %q", got)
+	}
+}
+
+func TestLoadConfigFromLookupEnvAllowedChatIDs(t *testing.T) {
+	cfg, err := LoadConfigFromLookupEnv(mapLookup(map[string]string{
+		EnvTelegramTrishnaToken:   "token",
+		EnvTelegramOwnerUserIDs:   "123",
+		EnvTelegramAllowedChatIDs: "42,-1001234567890",
+		EnvTelegramTransport:      TransportBotAPI,
+	}))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if len(cfg.AllowedChatIDs) != 2 || cfg.AllowedChatIDs[0] != 42 || cfg.AllowedChatIDs[1] != -1001234567890 {
+		t.Fatalf("allowed chats = %v", cfg.AllowedChatIDs)
+	}
+}
+
+func TestLoadConfigFromLookupEnvRejectsRemotePlainHTTPBotAPI(t *testing.T) {
+	_, err := LoadConfigFromLookupEnv(mapLookup(map[string]string{
+		EnvTelegramTrishnaToken: "token",
+		EnvTelegramOwnerUserIDs: "123",
+		EnvTelegramTransport:    TransportBotAPI,
+		EnvTelegramAPIBaseURL:   "http://api.example.com",
+	}))
+	if err == nil {
+		t.Fatal("expected remote plain HTTP API base error")
+	}
+}
+
+func TestLoadConfigFromLookupEnvAllowsLoopbackPlainHTTPBotAPI(t *testing.T) {
+	cfg, err := LoadConfigFromLookupEnv(mapLookup(map[string]string{
+		EnvTelegramTrishnaToken: "token",
+		EnvTelegramOwnerUserIDs: "123",
+		EnvTelegramTransport:    TransportBotAPI,
+		EnvTelegramAPIBaseURL:   "http://127.0.0.1:8081/",
+	}))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.APIBaseURL != "http://127.0.0.1:8081" {
+		t.Fatalf("api base url = %q", cfg.APIBaseURL)
 	}
 }
 
@@ -179,7 +240,7 @@ func TestLoadConfigFromLookupEnvRejectsInvalidProxyPort(t *testing.T) {
 		EnvTelegramMTProtoAppHash: "apphash",
 		EnvTelegramMTProxyHost:    "proxy.example.com",
 		EnvTelegramMTProxyPort:    "70000",
-		EnvTelegramMTProxySecret:  "0123456789abcdef0123456789abcdef",
+		EnvTelegramMTProxySecret:  validSecuredMTProxySecretHex,
 	}))
 	if err == nil {
 		t.Fatal("expected invalid proxy port error")

@@ -30,8 +30,17 @@ echo "Syncing launch agent env from .env..."
 echo "Restarting launch agent..."
 launchctl bootout "gui/$(id -u)/$PLIST_LABEL" 2>/dev/null || \
   launchctl unload "$PLIST_DEST" 2>/dev/null || true
-sleep 1
-if ! launchctl bootstrap "gui/$(id -u)" "$PLIST_DEST" 2>/dev/null; then
+
+loaded=false
+for _ in 1 2 3 4 5; do
+  sleep 1
+  if launchctl bootstrap "gui/$(id -u)" "$PLIST_DEST" 2>/dev/null; then
+    loaded=true
+    break
+  fi
+done
+
+if [ "$loaded" != true ]; then
   launchctl load "$PLIST_DEST"
 fi
 

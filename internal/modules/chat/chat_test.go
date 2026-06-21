@@ -26,14 +26,20 @@ func TestAllowedLocation(t *testing.T) {
 	}
 }
 
-func TestTrimForDiscord(t *testing.T) {
+func TestSplitForDiscord(t *testing.T) {
 	long := strings.Repeat("a", 2005)
-	got := trimForDiscord(long)
-	if len(got) != maxDiscordMessage {
-		t.Fatalf("len = %d", len(got))
+	got := splitForDiscord(long)
+	if len(got) != 2 {
+		t.Fatalf("parts = %d", len(got))
 	}
-	if !strings.HasSuffix(got, "...") {
-		t.Fatal("expected ellipsis suffix")
+	if len([]rune(got[0])) != maxDiscordMessage {
+		t.Fatalf("first len = %d", len([]rune(got[0])))
+	}
+	if len([]rune(got[1])) != 5 {
+		t.Fatalf("second len = %d", len([]rune(got[1])))
+	}
+	if strings.Join(got, "") != long {
+		t.Fatal("expected content to remain complete")
 	}
 }
 

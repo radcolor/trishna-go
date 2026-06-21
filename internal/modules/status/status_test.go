@@ -130,6 +130,35 @@ func TestBuildMessage(t *testing.T) {
 	}
 }
 
+func TestServicesAlignUnderValueColumn(t *testing.T) {
+	content := formatTrishnaSection(runtime.BotSnapshot{Ready: true}, []runtime.ServiceHealth{
+		{Name: "discord", Running: true, Detail: "connected"},
+		{Name: "telegram", Running: true, Detail: "telegram mtproto via mtproxy"},
+		{Name: "youtube", Running: true, Detail: "1 channel(s)"},
+	})
+
+	lines := strings.Split(content, "\n")
+	var services []string
+	for _, line := range lines {
+		if strings.Contains(line, "discord · running") ||
+			strings.Contains(line, "telegram · running") ||
+			strings.Contains(line, "youtube · running") {
+			services = append(services, line)
+		}
+	}
+	if len(services) != 3 {
+		t.Fatalf("service lines = %q", services)
+	}
+
+	firstColumn := strings.Index(services[0], "discord")
+	for _, line := range services[1:] {
+		column := strings.Index(line, strings.TrimSpace(line[:strings.Index(line, " · ")]))
+		if column != firstColumn {
+			t.Fatalf("service line %q starts at column %d, want %d", line, column, firstColumn)
+		}
+	}
+}
+
 func TestParseAllowlist(t *testing.T) {
 	ids, err := ParseAllowlist(" 123 , 456 ")
 	if err != nil {

@@ -2,11 +2,14 @@ package telegram
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -179,10 +182,11 @@ func TestRunOwnerTGNetSendsNetworkReport(t *testing.T) {
 	defer func() { publicIPCheckURL = oldPublicIPCheckURL }()
 
 	service := NewService(Config{
-		Token:        fakeToken,
-		OwnerUserIDs: []int64{42},
-		APIBaseURL:   api.URL(),
-		Transport:    TransportBotAPI,
+		Token:          fakeToken,
+		OwnerUserIDs:   []int64{42},
+		APIBaseURL:     api.URL(),
+		Transport:      TransportBotAPI,
+		TGNetRevealIPs: true,
 	}, nil, testLogger())
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -217,6 +221,51 @@ func TestRunOwnerTGNetSendsNetworkReport(t *testing.T) {
 	}
 }
 
+func TestRunOwnerTGNetHidesIPsByDefault(t *testing.T) {
+	api := newFakeTelegramAPI(t, []fakeUpdate{
+		messageUpdate(100, 42, 99, "/tgnet"),
+	})
+	defer api.close()
+
+	ipServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("public IP endpoint should not be called by default")
+		_, _ = io.WriteString(w, "203.0.113.7")
+	}))
+	defer ipServer.Close()
+	oldPublicIPCheckURL := publicIPCheckURL
+	publicIPCheckURL = ipServer.URL
+	defer func() { publicIPCheckURL = oldPublicIPCheckURL }()
+
+	service := NewService(Config{
+		Token:        fakeToken,
+		OwnerUserIDs: []int64{42},
+		APIBaseURL:   api.URL(),
+		Transport:    TransportBotAPI,
+	}, nil, testLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := runService(ctx, service)
+
+	select {
+	case sent := <-api.sentMessages:
+		cancel()
+		if !strings.Contains(sent.text, "Public IP:    hidden") {
+			t.Fatalf("public ip not hidden: %q", sent.text)
+		}
+		if strings.Contains(sent.text, "203.0.113.7") {
+			t.Fatalf("leaked public ip: %q", sent.text)
+		}
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("timed out waiting for sendMessage")
+	}
+
+	if err := waitService(errCh); err != nil {
+		t.Fatalf("run service: %v", err)
+	}
+}
+
 func TestRunNonOwnerPingIsIgnored(t *testing.T) {
 	api := newFakeTelegramAPI(t, []fakeUpdate{
 		messageUpdate(100, 7, 99, "/ping"),
@@ -228,6 +277,40 @@ func TestRunNonOwnerPingIsIgnored(t *testing.T) {
 		OwnerUserIDs: []int64{42},
 		APIBaseURL:   api.URL(),
 		Transport:    TransportBotAPI,
+	}, nil, testLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := runService(ctx, service)
+
+	select {
+	case <-api.afterScript:
+		cancel()
+	case sent := <-api.sentMessages:
+		cancel()
+		t.Fatalf("unexpected sendMessage: %+v", sent)
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("timed out waiting for updates")
+	}
+
+	if err := waitService(errCh); err != nil {
+		t.Fatalf("run service: %v", err)
+	}
+}
+
+func TestRunOwnerWrongChatIsIgnored(t *testing.T) {
+	api := newFakeTelegramAPI(t, []fakeUpdate{
+		messageUpdate(100, 42, 99, "/ping"),
+	})
+	defer api.close()
+
+	service := NewService(Config{
+		Token:          fakeToken,
+		OwnerUserIDs:   []int64{42},
+		AllowedChatIDs: []int64{100},
+		APIBaseURL:     api.URL(),
+		Transport:      TransportBotAPI,
 	}, nil, testLogger())
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -277,7 +360,85 @@ func TestRunStopsOnCanceledContext(t *testing.T) {
 	}
 }
 
+func TestRecordStoppedRedactsTelegramSecrets(t *testing.T) {
+	service := NewService(Config{
+		Token: "123456:secret-token",
+		MTProto: MTProtoConfig{
+			AppHash:     "apphash-secret",
+			SessionPath: "/tmp/trishna/mtproto-session.json",
+			ProxySecret: mustDecodeHex(t,
+				validTLSMTProxySecretHex,
+			),
+		},
+	}, nil, testLogger())
+
+	err := fmt.Errorf("token 123456:secret-token hash apphash-secret proxy %s session /tmp/trishna/mtproto-session.json mtproto-session.json", validTLSMTProxySecretHex)
+	service.recordStopped("stopped", err)
+
+	lastError := service.Health().LastError
+	for _, leaked := range []string{"123456:secret-token", "apphash-secret", validTLSMTProxySecretHex, "mtproto-session.json"} {
+		if strings.Contains(lastError, leaked) {
+			t.Fatalf("last error leaked %q: %q", leaked, lastError)
+		}
+	}
+}
+
+func TestEnsureSecureSessionPathRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target-session.json")
+	if err := os.WriteFile(target, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	link := filepath.Join(dir, "mtproto-session.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	err := ensureSecureSessionPath(link)
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+}
+
+func TestEnsureSecureSessionPathRepairsPermissions(t *testing.T) {
+	sessionDir := filepath.Join(t.TempDir(), "telegram")
+	if err := os.Mkdir(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	sessionPath := filepath.Join(sessionDir, "mtproto-session.json")
+	if err := os.WriteFile(sessionPath, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+
+	if err := ensureSecureSessionPath(sessionPath); err != nil {
+		t.Fatalf("ensure session: %v", err)
+	}
+	sessionInfo, err := os.Stat(sessionPath)
+	if err != nil {
+		t.Fatalf("stat session: %v", err)
+	}
+	if got := sessionInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("session mode = %o", got)
+	}
+	dirInfo, err := os.Stat(sessionDir)
+	if err != nil {
+		t.Fatalf("stat session dir: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("session dir mode = %o", got)
+	}
+}
+
 const fakeToken = "123:test"
+
+func mustDecodeHex(t *testing.T, value string) []byte {
+	t.Helper()
+	bytes, err := hex.DecodeString(value)
+	if err != nil {
+		t.Fatalf("decode hex: %v", err)
+	}
+	return bytes
+}
 
 type fakeTelegramAPI struct {
 	t *testing.T

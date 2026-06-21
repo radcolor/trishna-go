@@ -41,6 +41,8 @@ DISCORD_GUILD_ID=optional-dev-guild-id
 LOG_LEVEL=info
 TELEGRAM_TRISHNA_TOKEN=your-telegram-bot-token
 TELEGRAM_OWNER_USER_IDS=your-telegram-user-id
+TELEGRAM_ALLOWED_CHAT_IDS=optional-chat-id
+TELEGRAM_TGNET_REVEAL_IPS=false
 TELEGRAM_TRANSPORT=mtproto
 TELEGRAM_MTPROTO_APP_ID=your-telegram-api-id
 TELEGRAM_MTPROTO_APP_HASH=your-telegram-api-hash
@@ -76,11 +78,13 @@ SHAWNB_HISTORY_LIMIT=20
 
 `DISCORD_TRISHNA_TOKEN` enables Trishna's Discord adapter. `DISCORD_TOKEN` still works as a legacy fallback. If Discord config is missing or invalid, the process can still run other enabled adapters such as YouTube chat.
 
-`TELEGRAM_TRISHNA_TOKEN` enables Trishna's Telegram adapter. `TELEGRAM_OWNER_USER_IDS` is required when the Telegram token is set; only those numeric Telegram user IDs can run commands in DMs or groups.
+`TELEGRAM_TRISHNA_TOKEN` enables Trishna's Telegram adapter. `TELEGRAM_OWNER_USER_IDS` is required when the Telegram token is set; only those numeric Telegram user IDs can run commands in DMs or groups. `TELEGRAM_ALLOWED_CHAT_IDS` optionally restricts owner commands to specific Telegram chats; leave it empty to preserve owner-only behavior everywhere.
 
-`TELEGRAM_TRANSPORT=mtproto` is the default. It uses Telegram MTProto through MTProxy by default, so `TELEGRAM_MTPROTO_APP_ID`, `TELEGRAM_MTPROTO_APP_HASH`, `TELEGRAM_MTPROTO_PROXY_HOST`, `TELEGRAM_MTPROTO_PROXY_PORT`, and `TELEGRAM_MTPROTO_PROXY_SECRET` are required. The MTProto session is stored at `TELEGRAM_MTPROTO_SESSION_PATH` with `0600` file permissions.
+`TELEGRAM_TRANSPORT=mtproto` is the default. It uses Telegram MTProto through MTProxy by default, so `TELEGRAM_MTPROTO_APP_ID`, `TELEGRAM_MTPROTO_APP_HASH`, `TELEGRAM_MTPROTO_PROXY_HOST`, `TELEGRAM_MTPROTO_PROXY_PORT`, and `TELEGRAM_MTPROTO_PROXY_SECRET` are required. Use secured (`dd`/`ee`) or TLS cloak MTProxy secrets; simple 16-byte MTProxy secrets are rejected. The MTProto session is stored at `TELEGRAM_MTPROTO_SESSION_PATH` with `0600` file permissions, and the parent directory is kept at `0700`.
 
-Set `TELEGRAM_MTPROTO_PROXY_ENABLED=false` only when you intentionally want direct MTProto traffic, such as routing Telegram through WireGuard outside Trishna. Set `TELEGRAM_TRANSPORT=botapi` to use the old cloud/local Bot API path; `TELEGRAM_API_BASE_URL` can point to a local Bot API server such as `http://127.0.0.1:8081`.
+Set `TELEGRAM_MTPROTO_PROXY_ENABLED=false` only when you intentionally want direct MTProto traffic, such as routing Telegram through WireGuard outside Trishna. Set `TELEGRAM_TRANSPORT=botapi` to use the old cloud/local Bot API path; if `TELEGRAM_API_BASE_URL` uses plain HTTP, it must point to loopback or a private local address such as `http://127.0.0.1:8081`.
+
+Telegram bot chats are not end-to-end encrypted. MTProxy improves network-path privacy and censorship resistance, but Telegram servers and this bot process can still read bot chat contents. `/tgnet` hides local/public IP values by default; set `TELEGRAM_TGNET_REVEAL_IPS=true` only while debugging routing.
 
 Trishna `/status` includes a **shawnb** section (Discord connection via heartbeat file). shawnb writes `data/shawnb/heartbeat.json` every 10 seconds while connected.
 
@@ -231,7 +235,7 @@ tail -f "$HOME/Library/Application Support/trishna-go/data/shawnb/chats/$(date +
 
 Both services are user launch agents (`com.radcolor.trishna`, `com.radcolor.shawnb`), so they start when your Mac Mini user logs in. Enable automatic login in **System Settings → Users & Groups** if you want them running after every reboot without manual sign-in.
 
-`install.sh` and `install-shawnb.sh` read `.env` and inject values into the launch agents. Keep `.env` gitignored and re-run the install or restart script after changing secrets.
+`install.sh` and `install-shawnb.sh` read `.env` and inject values into the launch agents. Keep `.env` gitignored and re-run the install or restart script after changing secrets. Trishna's runtime `.env` is installed with `0600` permissions; Telegram runtime data is kept under a `0700` directory.
 
 ## Test
 

@@ -31,6 +31,7 @@ type Service struct {
 	configErr  error
 	logger     *slog.Logger
 	owners     map[int64]struct{}
+	chats      map[int64]struct{}
 	status     func(context.Context) string
 	statusHTML func(context.Context) string
 
@@ -55,12 +56,17 @@ func NewService(cfg Config, configErr error, logger *slog.Logger) *Service {
 	for _, id := range cfg.OwnerUserIDs {
 		owners[id] = struct{}{}
 	}
+	chats := make(map[int64]struct{}, len(cfg.AllowedChatIDs))
+	for _, id := range cfg.AllowedChatIDs {
+		chats[id] = struct{}{}
+	}
 
 	return &Service{
 		cfg:       cfg,
 		configErr: configErr,
 		logger:    logger,
 		owners:    owners,
+		chats:     chats,
 		detail:    "not started",
 	}
 }
@@ -92,7 +98,7 @@ func (s *Service) Health() runtime.ServiceHealth {
 func (s *Service) Run(ctx context.Context) error {
 	if s.configErr != nil {
 		s.recordStopped("disabled (config error)", s.configErr)
-		s.logger.Warn("telegram disabled by config error", slog.String("error", s.configErr.Error()))
+		s.logger.Warn("telegram disabled by config error", slog.String("error", s.redactTelegramSecrets(s.configErr.Error())))
 		<-ctx.Done()
 		return nil
 	}
@@ -125,7 +131,7 @@ func (s *Service) runBotAPI(ctx context.Context) error {
 		})
 		if err != nil {
 			s.recordStopped("failed to start", err)
-			s.logger.Warn("telegram failed to start", slog.String("error", err.Error()))
+			s.logger.Warn("telegram failed to start", slog.String("error", s.redactTelegramSecrets(err.Error())))
 			if !sleepContext(ctx, retryBackoff) {
 				break
 			}
@@ -144,14 +150,14 @@ func (s *Service) runBotAPI(ctx context.Context) error {
 			if ctx.Err() != nil {
 				break
 			}
-			s.logger.Warn("failed to drop stale telegram updates", slog.String("error", err.Error()))
+			s.logger.Warn("failed to drop stale telegram updates", slog.String("error", s.redactTelegramSecrets(err.Error())))
 		} else {
 			offset = latestOffset
 		}
 
 		if err := s.poll(ctx, bot, offset); err != nil && ctx.Err() == nil {
 			s.recordStopped("stopped", err)
-			s.logger.Warn("telegram stopped", slog.String("error", err.Error()))
+			s.logger.Warn("telegram stopped", slog.String("error", s.redactTelegramSecrets(err.Error())))
 			if !sleepContext(ctx, retryBackoff) {
 				break
 			}
@@ -193,7 +199,7 @@ func (s *Service) poll(ctx context.Context, bot *gotgbot.Bot, offset int64) erro
 				break
 			}
 			s.recordStopped("poll error", err)
-			s.logger.Warn("telegram poll error", slog.String("error", err.Error()))
+			s.logger.Warn("telegram poll error", slog.String("error", s.redactTelegramSecrets(err.Error())))
 			if !sleepContext(ctx, retryBackoff) {
 				break
 			}
@@ -207,7 +213,7 @@ func (s *Service) poll(ctx context.Context, bot *gotgbot.Bot, offset int64) erro
 				if ctx.Err() != nil {
 					break
 				}
-				s.logger.Warn("telegram update error", slog.String("error", err.Error()))
+				s.logger.Warn("telegram update error", slog.String("error", s.redactTelegramSecrets(err.Error())))
 			}
 		}
 	}
@@ -221,7 +227,7 @@ func (s *Service) handleUpdate(ctx context.Context, bot *gotgbot.Bot, update got
 	}
 
 	message := update.Message
-	if message.From == nil || !s.isOwner(message.From.Id) {
+	if message.From == nil || !s.isOwner(message.From.Id) || !s.isAllowedChat(message.Chat.Id) {
 		return nil
 	}
 
@@ -281,6 +287,14 @@ func (s *Service) isOwner(userID int64) bool {
 	return ok
 }
 
+func (s *Service) isAllowedChat(chatID int64) bool {
+	if len(s.chats) == 0 {
+		return true
+	}
+	_, ok := s.chats[chatID]
+	return ok
+}
+
 func (s *Service) requestOpts(timeout time.Duration) *gotgbot.RequestOpts {
 	return &gotgbot.RequestOpts{
 		Timeout: timeout,
@@ -304,7 +318,7 @@ func (s *Service) recordStopped(detail string, err error) {
 	s.running = false
 	s.detail = detail
 	if err != nil {
-		s.lastError = err.Error()
+		s.lastError = s.redactTelegramSecrets(err.Error())
 	}
 }
 

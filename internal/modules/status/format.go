@@ -13,6 +13,8 @@ import (
 	"github.com/radcolor/trishna-go/internal/shawnb/monitor"
 )
 
+const labelWidth = 12
+
 type Report struct {
 	TrishnaBot      runtime.BotSnapshot
 	TrishnaServices []runtime.ServiceHealth
@@ -199,11 +201,13 @@ func formatOllamaLoadedModels(models []ollama.LoadedModel) string {
 		}
 		parts = append(parts, part)
 	}
-	return strings.Join(parts, "\n              ")
+	return strings.Join(parts, "\n")
 }
 
 func line(label, value string) string {
-	return fmt.Sprintf("%-12s %s", label+":", value)
+	indent := strings.Repeat(" ", labelWidth+1)
+	value = strings.ReplaceAll(value, "\n", "\n"+indent)
+	return fmt.Sprintf("%-*s %s", labelWidth, label+":", value)
 }
 
 func formatUptime(d time.Duration, ready bool) string {
@@ -246,7 +250,7 @@ func formatServices(services []runtime.ServiceHealth) string {
 		}
 		lines = append(lines, line)
 	}
-	return strings.Join(lines, "\n              ")
+	return strings.Join(lines, "\n")
 }
 
 func formatSystem(host platform.HostSnapshot) string {

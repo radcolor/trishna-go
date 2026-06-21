@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -16,6 +17,8 @@ const (
 	EnvTelegramOwnerUserIDs       = "TELEGRAM_OWNER_USER_IDS"
 	EnvTelegramAPIBaseURL         = "TELEGRAM_API_BASE_URL"
 	EnvTelegramTransport          = "TELEGRAM_TRANSPORT"
+	EnvTelegramAllowedChatIDs     = "TELEGRAM_ALLOWED_CHAT_IDS"
+	EnvTelegramTGNetRevealIPs     = "TELEGRAM_TGNET_REVEAL_IPS"
 	EnvTelegramMTProtoAppID       = "TELEGRAM_MTPROTO_APP_ID"
 	EnvTelegramMTProtoAppHash     = "TELEGRAM_MTPROTO_APP_HASH"
 	EnvTelegramMTProtoSessionPath = "TELEGRAM_MTPROTO_SESSION_PATH"
@@ -31,11 +34,13 @@ const (
 )
 
 type Config struct {
-	Token        string
-	OwnerUserIDs []int64
-	APIBaseURL   string
-	Transport    string
-	MTProto      MTProtoConfig
+	Token          string
+	OwnerUserIDs   []int64
+	AllowedChatIDs []int64
+	APIBaseURL     string
+	Transport      string
+	TGNetRevealIPs bool
+	MTProto        MTProtoConfig
 }
 
 type MTProtoConfig struct {
@@ -88,6 +93,14 @@ func LoadConfigFromLookupEnv(lookup LookupEnv) (Config, error) {
 		cfg.MTProto.ProxyEnabled = enabled
 	}
 
+	if rawRevealIPs, ok := lookupTrimmed(lookup, EnvTelegramTGNetRevealIPs); ok {
+		revealIPs, err := parseBool(rawRevealIPs)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse %s: %w", EnvTelegramTGNetRevealIPs, err)
+		}
+		cfg.TGNetRevealIPs = revealIPs
+	}
+
 	if cfg.Token == "" {
 		return cfg, nil
 	}
@@ -101,12 +114,23 @@ func LoadConfigFromLookupEnv(lookup LookupEnv) (Config, error) {
 	}
 	cfg.OwnerUserIDs = owners
 
-	if cfg.Transport == TransportMTProto {
+	allowedChats, err := parseAllowedChatIDs(lookupTrimmedValue(lookup, EnvTelegramAllowedChatIDs))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.AllowedChatIDs = allowedChats
+
+	switch cfg.Transport {
+	case TransportMTProto:
 		mtproto, err := loadMTProtoConfig(lookup, cfg.MTProto)
 		if err != nil {
 			return Config{}, err
 		}
 		cfg.MTProto = mtproto
+	case TransportBotAPI:
+		if err := validateBotAPIBaseURL(cfg.APIBaseURL); err != nil {
+			return Config{}, err
+		}
 	}
 
 	return cfg, nil
@@ -147,6 +171,9 @@ func loadMTProtoConfig(lookup LookupEnv, cfg MTProtoConfig) (MTProtoConfig, erro
 
 	proxySecret, err := parseMTProxySecret(lookupTrimmedValue(lookup, EnvTelegramMTProxySecret))
 	if err != nil {
+		return MTProtoConfig{}, fmt.Errorf("parse %s: %w", EnvTelegramMTProxySecret, err)
+	}
+	if err := validateMTProxySecretStrength(proxySecret); err != nil {
 		return MTProtoConfig{}, fmt.Errorf("parse %s: %w", EnvTelegramMTProxySecret, err)
 	}
 	cfg.ProxySecret = proxySecret
@@ -220,6 +247,42 @@ func parseMTProxySecret(value string) ([]byte, error) {
 	return nil, fmt.Errorf("unsupported secret encoding")
 }
 
+func validateMTProxySecretStrength(raw []byte) error {
+	secret, err := mtproxy.ParseSecret(raw)
+	if err != nil {
+		return err
+	}
+	if secret.Type == mtproxy.Simple {
+		return fmt.Errorf("simple MTProxy secrets are not allowed; use secured or TLS MTProxy secret")
+	}
+	return nil
+}
+
+func validateBotAPIBaseURL(value string) error {
+	if value == "" {
+		return nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", EnvTelegramAPIBaseURL, err)
+	}
+	if !strings.EqualFold(parsed.Scheme, "http") {
+		return nil
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("%s plain HTTP URL must include a host", EnvTelegramAPIBaseURL)
+	}
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !(ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
+		return fmt.Errorf("%s plain HTTP is only allowed for loopback or private local addresses", EnvTelegramAPIBaseURL)
+	}
+	return nil
+}
+
 func mtProxySecretFromURL(value string) (string, bool) {
 	parsed, err := url.Parse(value)
 	if err != nil {
@@ -270,6 +333,14 @@ func decodeMTProxySecretBase64(value string) ([]byte, bool) {
 }
 
 func parseOwnerUserIDs(value string) ([]int64, error) {
+	return parseTelegramIDs(value, EnvTelegramOwnerUserIDs, false)
+}
+
+func parseAllowedChatIDs(value string) ([]int64, error) {
+	return parseTelegramIDs(value, EnvTelegramAllowedChatIDs, true)
+}
+
+func parseTelegramIDs(value, envName string, allowNegative bool) ([]int64, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil, nil
@@ -283,8 +354,8 @@ func parseOwnerUserIDs(value string) ([]int64, error) {
 			continue
 		}
 		id, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || id <= 0 {
-			return nil, fmt.Errorf("parse %s: invalid Telegram user ID %q", EnvTelegramOwnerUserIDs, raw)
+		if err != nil || id == 0 || (!allowNegative && id < 0) {
+			return nil, fmt.Errorf("parse %s: invalid Telegram ID %q", envName, raw)
 		}
 		ids = append(ids, id)
 	}

@@ -68,10 +68,17 @@ func (s *Service) networkLines(ctx context.Context) []string {
 		lines = append(lines, "Transport:    unknown")
 	}
 
-	lines = append(lines,
-		fmt.Sprintf("Local IP:     %s", localOutboundIP()),
-		fmt.Sprintf("Public IP:    %s", publicIP(ctx)),
-	)
+	if s.cfg.TGNetRevealIPs {
+		lines = append(lines,
+			fmt.Sprintf("Local IP:     %s", localOutboundIP()),
+			fmt.Sprintf("Public IP:    %s", publicIP(ctx)),
+		)
+	} else {
+		lines = append(lines,
+			"Local IP:     hidden (set TELEGRAM_TGNET_REVEAL_IPS=true to reveal)",
+			"Public IP:    hidden (set TELEGRAM_TGNET_REVEAL_IPS=true to reveal)",
+		)
+	}
 	return lines
 }
 
