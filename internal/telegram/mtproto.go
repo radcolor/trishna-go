@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/gotd/td/session"
 	gotdtelegram "github.com/gotd/td/telegram"
@@ -18,14 +19,18 @@ import (
 )
 
 func (s *Service) runMTProto(ctx context.Context) error {
+	failures := 0
 	for ctx.Err() == nil {
+		started := time.Now()
 		if err := s.runMTProtoOnce(ctx); err != nil {
 			if ctx.Err() != nil {
 				break
 			}
-			s.recordStopped("mtproto stopped", err)
-			s.logger.Warn("telegram mtproto stopped", slog.String("error", s.redactTelegramSecrets(err.Error())))
-			if !sleepContext(ctx, retryBackoff) {
+			if s.hasOKSince(started) {
+				failures = 0
+			}
+			failures++
+			if !s.retryOrGiveUp(ctx, failures, "telegram mtproto stopped", err) {
 				break
 			}
 			continue

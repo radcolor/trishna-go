@@ -22,9 +22,10 @@ const (
 	pollRequestTimeout   = 35 * time.Second
 	shortRequestTimeout  = 10 * time.Second
 	sendRequestTimeout   = 5 * time.Second
-	retryBackoff         = 2 * time.Second
 	allowedUpdateMessage = "message"
 )
+
+var retrySchedule = append([]time.Duration(nil), runtime.DefaultRetrySchedule...)
 
 type Service struct {
 	cfg        Config
@@ -125,14 +126,14 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) runBotAPI(ctx context.Context) error {
+	failures := 0
 	for ctx.Err() == nil {
 		bot, err := gotgbot.NewBot(s.cfg.Token, &gotgbot.BotOpts{
 			RequestOpts: s.requestOpts(shortRequestTimeout),
 		})
 		if err != nil {
-			s.recordStopped("failed to start", err)
-			s.logger.Warn("telegram failed to start", slog.String("error", s.redactTelegramSecrets(err.Error())))
-			if !sleepContext(ctx, retryBackoff) {
+			failures++
+			if !s.retryOrGiveUp(ctx, failures, "telegram failed to start", err) {
 				break
 			}
 			continue
@@ -144,21 +145,25 @@ func (s *Service) runBotAPI(ctx context.Context) error {
 		}
 		s.recordRunning("telegram botapi @" + username)
 		s.logger.Info("telegram running", slog.String("transport", TransportBotAPI), slog.String("bot", username))
+		failures = 0
 
 		offset := int64(0)
 		if latestOffset, err := s.dropStaleUpdates(ctx, bot); err != nil {
 			if ctx.Err() != nil {
 				break
 			}
-			s.logger.Warn("failed to drop stale telegram updates", slog.String("error", s.redactTelegramSecrets(err.Error())))
+			failures++
+			if !s.retryOrGiveUp(ctx, failures, "failed to drop stale telegram updates", err) {
+				break
+			}
+			continue
 		} else {
 			offset = latestOffset
 		}
 
 		if err := s.poll(ctx, bot, offset); err != nil && ctx.Err() == nil {
-			s.recordStopped("stopped", err)
-			s.logger.Warn("telegram stopped", slog.String("error", s.redactTelegramSecrets(err.Error())))
-			if !sleepContext(ctx, retryBackoff) {
+			failures++
+			if !s.retryOrGiveUp(ctx, failures, "telegram stopped", err) {
 				break
 			}
 		}
@@ -200,10 +205,7 @@ func (s *Service) poll(ctx context.Context, bot *gotgbot.Bot, offset int64) erro
 			}
 			s.recordStopped("poll error", err)
 			s.logger.Warn("telegram poll error", slog.String("error", s.redactTelegramSecrets(err.Error())))
-			if !sleepContext(ctx, retryBackoff) {
-				break
-			}
-			continue
+			return err
 		}
 
 		s.recordRunning("telegram botapi polling")
@@ -320,6 +322,35 @@ func (s *Service) recordStopped(detail string, err error) {
 	if err != nil {
 		s.lastError = s.redactTelegramSecrets(err.Error())
 	}
+}
+
+func (s *Service) hasOKSince(t time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastOK != nil && !s.lastOK.Before(t)
+}
+
+func (s *Service) retryOrGiveUp(ctx context.Context, attempt int, detail string, err error) bool {
+	delay, ok := runtime.RetryDelay(retrySchedule, attempt)
+	if !ok {
+		s.recordStopped(detail+"; gave up", err)
+		s.logger.Error("telegram gave up; manual restart required",
+			slog.Int("attempts", attempt-1),
+			slog.String("error", s.redactTelegramSecrets(err.Error())),
+		)
+		<-ctx.Done()
+		s.recordStopped("stopped", nil)
+		return false
+	}
+
+	s.recordStopped(detail+"; retrying", err)
+	s.logger.Warn("telegram retry scheduled",
+		slog.Int("attempt", attempt),
+		slog.Int("max_attempts", len(retrySchedule)),
+		slog.Duration("retry_in", delay),
+		slog.String("error", s.redactTelegramSecrets(err.Error())),
+	)
+	return sleepContext(ctx, delay)
 }
 
 func parseCommand(text, botUsername string) (string, bool) {

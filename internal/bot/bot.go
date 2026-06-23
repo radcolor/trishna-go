@@ -26,6 +26,7 @@ type Options struct {
 	Activity          string
 	GatewayConfigOpts []gateway.ConfigOpt
 	ExtraListeners    []disgobot.EventListener
+	OnRestReady       func(rest.Rest)
 }
 
 type App struct {
@@ -115,6 +116,9 @@ func (a *App) Run(ctx context.Context) error {
 
 	if err := a.client.OpenGateway(ctx); err != nil {
 		return err
+	}
+	if a.opts.OnRestReady != nil {
+		a.opts.OnRestReady(a.client.Rest)
 	}
 
 	if err := a.ensureUsername(ctx); err != nil {

@@ -100,10 +100,11 @@ func run() error {
 
 	reminderScheduler := reminder.NewScheduler(reminderStore, llmClient, restProvider, runtimeState, chatStore, logger)
 
-	app, err := shawnbot.New(cfg.BotConfig(), registry, logger, runtimeState, shawnbot.Options{
-		LogName:  "shawnb",
-		Username: "shawnb",
-		Activity: "thinking of you...",
+	discordService := shawnbot.NewService(cfg.BotConfig(), registry, logger, runtimeState, shawnbot.Options{
+		LogName:    "shawnb",
+		HealthName: "discord",
+		Username:   "shawnb",
+		Activity:   "thinking of you...",
 		GatewayConfigOpts: []gateway.ConfigOpt{
 			gateway.WithIntents(
 				gateway.IntentGuilds,
@@ -113,15 +114,10 @@ func run() error {
 			),
 		},
 		ExtraListeners: []disgobot.EventListener{chatModule.EventListener()},
+		OnRestReady:    restProvider.Bind,
 	}, heartbeatService, reminderScheduler)
-	if err != nil {
-		return err
-	}
-	defer app.Close(context.Background())
 
-	restProvider.Bind(app.Rest())
-
-	return app.Run(ctx)
+	return discordService.Run(ctx)
 }
 
 func newLogger(level slog.Level) *slog.Logger {
